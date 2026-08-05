@@ -64,7 +64,6 @@ Object.assign(deepSeek, {
   description: "Latest frontier agentic coding model.",
   default_reasoning_level: "high",
   supported_reasoning_levels: [
-    { effort: "low", description: "Fast responses with lighter reasoning" },
     { effort: "high", description: "Extra high reasoning depth for complex problems" },
     { effort: "max", description: "Maximum reasoning depth for the hardest problems" }
   ],
