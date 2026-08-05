@@ -1,0 +1,17 @@
+{
+  "name": "codex-model-router",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loopback-only Responses API router for ChatGPT Codex and DeepSeek.",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "start:bg": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Start-Background.ps1",
+    "test": "node --test test/*.test.mjs",
+    "build:catalog": "node scripts/build-model-catalog.mjs",
+    "migrate:sessions": "node scripts/migrate-sessions.mjs"
+  }
+}

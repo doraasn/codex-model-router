@@ -1,0 +1,15 @@
+{
+  "host": "127.0.0.1",
+  "port": 4010,
+  "maxBodyBytes": 67108864,
+  "requestTimeoutMs": 600000,
+  "chatgptBaseUrl": "https://chatgpt.com/backend-api/codex/",
+  "deepseekBaseUrl": "https://api.deepseek.com/",
+  "deepseekModels": [
+    "deepseek-v4-flash"
+  ],
+  "gptModelPrefixes": [
+    "gpt-",
+    "codex-"
+  ]
+}

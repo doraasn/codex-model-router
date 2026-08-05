@@ -1,0 +1,12 @@
+# Merge these top-level keys into %USERPROFILE%\.codex\config.toml.
+# Keep your existing MCP, plugin, trust, sandbox, and project settings.
+model = "gpt-5.6-sol"
+model_provider = "local_router"
+model_catalog_json = "C:/Projects/codex-model-router/config/models.json"
+
+[model_providers.local_router]
+name = "GPT + DeepSeek"
+base_url = "http://127.0.0.1:4010/v1"
+wire_api = "responses"
+requires_openai_auth = true
+supports_websockets = false
