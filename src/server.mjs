@@ -105,6 +105,21 @@ function sanitizeChatGptPayload(payload) {
   return changed;
 }
 
+// Codex desktop exposes xhigh for custom models but may hide max. Advertise
+// xhigh in the local catalog, then translate it to DeepSeek's real max tier.
+function normalizeDeepSeekPayload(payload) {
+  let changed = false;
+  if (payload?.reasoning?.effort === "xhigh") {
+    payload.reasoning.effort = "max";
+    changed = true;
+  }
+  if (payload?.reasoning_effort === "xhigh") {
+    payload.reasoning_effort = "max";
+    changed = true;
+  }
+  return changed;
+}
+
 function buildChatGptHeaders(incomingHeaders) {
   const headers = new Headers();
   for (const [name, rawValue] of Object.entries(incomingHeaders)) {
@@ -186,6 +201,8 @@ export async function createRouterServer(overrides = {}) {
       // 仅对 ChatGPT 路由清洗推理条目，保持 DeepSeek 请求原样透传
       let requestBody = body;
       if (route === "chatgpt" && sanitizeChatGptPayload(payload)) {
+        requestBody = Buffer.from(JSON.stringify(payload), "utf8");
+      } else if (route === "deepseek" && normalizeDeepSeekPayload(payload)) {
         requestBody = Buffer.from(JSON.stringify(payload), "utf8");
       }
 

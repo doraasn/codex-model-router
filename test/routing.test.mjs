@@ -79,6 +79,59 @@ test("routes GPT and DeepSeek without crossing credentials", async (t) => {
   assert.equal(deepSeekReceived[0].accountId, undefined);
 });
 
+test("maps xhigh to max only on the DeepSeek route", async (t) => {
+  const chatGptReceived = [];
+  const deepSeekReceived = [];
+  const chatGptServer = mockUpstream(chatGptReceived);
+  const deepSeekServer = mockUpstream(deepSeekReceived);
+  const chatGptPort = await listen(chatGptServer);
+  const deepSeekPort = await listen(deepSeekServer);
+  t.after(() => chatGptServer.close());
+  t.after(() => deepSeekServer.close());
+
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  t.after(() => delete process.env.DEEPSEEK_API_KEY);
+
+  const router = await createRouterServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      maxBodyBytes: 1024 * 1024,
+      requestTimeoutMs: 5000,
+      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
+      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
+      deepseekModels: new Set(["deepseek-v4-flash"]),
+      gptModelPrefixes: ["gpt-", "codex-"],
+    },
+  });
+  const routerPort = await listen(router);
+  t.after(() => router.close());
+
+  const headers = {
+    authorization: "Bearer chatgpt-test-token",
+    "content-type": "application/json",
+  };
+
+  const gptResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "gpt-5.6-sol", input: "hello", reasoning: { effort: "xhigh" } }),
+  });
+  assert.equal(gptResponse.status, 200);
+  await gptResponse.text();
+
+  const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "deepseek-v4-flash", input: "hello", reasoning: { effort: "xhigh" } }),
+  });
+  assert.equal(deepSeekResponse.status, 200);
+  await deepSeekResponse.text();
+
+  assert.equal(chatGptReceived[0].body.reasoning.effort, "xhigh");
+  assert.equal(deepSeekReceived[0].body.reasoning.effort, "max");
+});
+
 test("sanitizes DeepSeek reasoning content only on the ChatGPT route", async (t) => {
   const chatGptReceived = [];
   const deepSeekReceived = [];

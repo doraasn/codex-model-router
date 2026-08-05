@@ -65,7 +65,7 @@ Object.assign(deepSeek, {
   default_reasoning_level: "high",
   supported_reasoning_levels: [
     { effort: "high", description: "Extra high reasoning depth for complex problems" },
-    { effort: "max", description: "Maximum reasoning depth for the hardest problems" }
+    { effort: "xhigh", description: "Maximum reasoning depth for the hardest problems" }
   ],
   shell_type: "shell_command",
   visibility: "list",
