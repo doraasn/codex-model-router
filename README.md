@@ -42,7 +42,7 @@ Key 明文保存在 `secrets\deepseek-key.txt`（Git 已忽略），换机器直
 
 ## 三、启动路由器
 
-- 后台：双击 `start-router.bat`，或运行 `npm run start:bg`
+- 后台：双击 `start-router.bat`（已运行时自动重启），或运行 `npm run start:bg`（已运行时不重启）
 - 前台（便于看日志）：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-Router.ps1`
 - 健康检查：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-Router.ps1`
 
