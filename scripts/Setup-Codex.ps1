@@ -37,6 +37,14 @@ if ($alreadyConfigured -and -not $Force) {
 # Extract the three top-level keys and the local_router section from the snippet.
 $topKeys = [regex]::Matches($snippetText, '(?m)^(model|model_provider|model_catalog_json)\s*=.*$') |
     ForEach-Object { $_.Value }
+# model_catalog_json must point at this project's actual location, never a hardcoded path.
+$topKeys = $topKeys | ForEach-Object {
+    if ($_ -match '^model_catalog_json\s*=') {
+        'model_catalog_json = "' + $expectedCatalogPath + '"'
+    } else {
+        $_
+    }
+}
 $providerMatch = [regex]::Match($snippetText, '(?ms)\[model_providers\.local_router\].*$')
 if (-not $providerMatch.Success) {
     throw "No [model_providers.local_router] section found in $snippetPath"

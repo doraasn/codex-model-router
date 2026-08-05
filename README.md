@@ -7,6 +7,10 @@
 
 路由器无第三方运行时依赖，只监听 `127.0.0.1`，不记录请求头、请求正文或响应正文。
 
+## 适用环境
+
+本项目在 Windows 环境、微软商店版 ChatGPT（Codex 桌面端）上开发并验证。其他安装渠道或版本（如独立 CLI、其他发行渠道、Linux/macOS 等）仅供参考，不保证完全生效。
+
 ## 前置条件
 
 - Windows 10/11
@@ -19,19 +23,15 @@ DeepSeek 当前只声明 `deepseek-v4-flash` 可用于 Codex。不要在官方�
 
 ## 安装目录
 
-推荐放在：
-
-```text
-C:\Projects\codex-model-router
-```
+放在任意独立目录即可，例如 `D:\Tools\codex-model-router`，把整个项目复制过去后按下面的步骤操作。
 
 如果当前项目不在该目录，可在当前项目目录运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-To-CProjects.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install-To-CProjects.ps1 -TargetDirectory D:\Tools\codex-model-router
 ```
 
-脚本在目标已经存在时会拒绝覆盖，并在复制完成后生成合并模型目录。
+脚本在目标已经存在时会拒绝覆盖，并在复制完成后生成合并模型目录。`-TargetDirectory` 可换成你自己的目标目录。
 
 ## 一、生成合并模型目录
 
@@ -89,14 +89,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-Router.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Setup-Codex.ps1
 ```
 
-脚本会把 `config\codex-config-snippet.toml` 中的顶层字段和 provider 段合并到 `%USERPROFILE%\.codex\config.toml`，保留原有 MCP、插件、沙箱和项目设置，并把原配置备份到 `backups\config.toml.<时间戳>.bak`。想先看效果可以加 `-DryRun`；已经配置过时会提示并跳过，用 `-Force` 可重新应用。
+脚本会把 `config\codex-config-snippet.toml` 中的顶层字段和 provider 段合并到 `%USERPROFILE%\.codex\config.toml`，其中 `model_catalog_json` 会自动填成这个项目在你机器上的实际路径，无需手动改。脚本保留原有 MCP、插件、沙箱和项目设置，并把原配置备份到 `backups\config.toml.<时间戳>.bak`。想先看效果可以加 `-DryRun`；已经配置过时会提示并跳过，用 `-Force` 可重新应用。
 
 手动合并也可以，合并后应包含：
 
 ```toml
 model = "gpt-5.6-sol"
 model_provider = "local_router"
-model_catalog_json = "C:/Projects/codex-model-router/config/models.json"
+model_catalog_json = "<你的安装目录>/config/models.json"
 
 [model_providers.local_router]
 name = "GPT + DeepSeek"
@@ -106,7 +106,7 @@ requires_openai_auth = true
 supports_websockets = false
 ```
 
-确认 `model_catalog_json` 指向的路径与实际安装目录一致，然后完全退出并重新打开 Codex 桌面端。模型列表中应同时出现 GPT 模型和 `DeepSeek-V4-Flash`。
+手动合并时把 `<你的安装目录>` 替换成实际路径；运行 `Setup-Codex.ps1` 则不需要。确认 `model_catalog_json` 指向的路径与实际安装目录一致，然后完全退出并重新打开 Codex 桌面端。模型列表中应同时出现 GPT 模型和 `DeepSeek-V4-Flash`。
 
 ## 五、迁移历史会话（可选，带旧会话时才需要）
 
