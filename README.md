@@ -71,7 +71,7 @@ requires_openai_auth = true
 supports_websockets = false
 ```
 
-然后完全退出并重新打开 Codex，模型列表应同时出现 GPT 和 DeepSeek-V4-Flash。
+然后完全退出并重新打开 Codex，模型列表应同时出现 GPT 和 DS-V4-Flash。
 
 ## 五、迁移历史会话（可选）
 
@@ -97,7 +97,7 @@ node .\scripts\migrate-sessions.mjs
 ## 六、验证
 
 - 路由器健康：`Test-Router.ps1` 或访问 http://127.0.0.1:4010/healthz
-- 模型列表出现 GPT 和 DeepSeek-V4-Flash
+- 模型列表出现 GPT 和 DS-V4-Flash
 - 发消息后看 `logs\router.out.log`（前台模式）：`route=chatgpt` / `route=deepseek`，状态 200
 - 没有 `models_cache.json`：先启动一次 Codex 再重新生成
 - 4010 端口被占用：换端口，并同步改 `config\router.config.json` 和 Codex 配置的 `base_url`

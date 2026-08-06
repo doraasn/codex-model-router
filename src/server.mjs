@@ -117,6 +117,15 @@ function normalizeDeepSeekPayload(payload) {
     payload.reasoning_effort = "max";
     changed = true;
   }
+  // DeepSeek 官方没有服务档位概念；防御性剥离 Codex 可能带上的 service_tier。
+  if (payload?.service_tier !== undefined) {
+    delete payload.service_tier;
+    changed = true;
+  }
+  if (payload?.serviceTier !== undefined) {
+    delete payload.serviceTier;
+    changed = true;
+  }
   return changed;
 }
 
