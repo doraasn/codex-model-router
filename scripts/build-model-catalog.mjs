@@ -45,9 +45,15 @@ function normalizeModel(model) {
 }
 
 // 以 DeepSeek 官方目录为基准（完整 GPT-5 harness、freeform apply_patch、
-// 官方上下文窗口、low/high/max 档位等），只覆盖显示名简化。
+// 官方上下文窗口等），覆盖两个有意调整的字段：显示名简化，以及把官方 max
+// 档以 xhigh 形式暴露给 Codex 桌面端（客户端会过滤第三方模型的 max；路由器
+// 会在 DeepSeek 路线上把 xhigh 转回官方 max）。
 const deepSeek = structuredClone(officialFlash);
 deepSeek.display_name = "DS-V4-Flash";
+deepSeek.supported_reasoning_levels = [
+  { effort: "high", description: "Extra high reasoning depth for complex problems" },
+  { effort: "xhigh", description: "Maximum reasoning depth for the hardest problems" },
+];
 
 const models = catalog.models
   .filter((model) => model.slug !== deepSeek.slug)
