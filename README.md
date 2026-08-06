@@ -109,7 +109,7 @@ node .\scripts\migrate-sessions.mjs
 
 ## 同任务切换模型
 
-DeepSeek 历史条目的推理文本和 id 格式与官方不同。转发给 ChatGPT 前，路由器会自动把推理文本转换到 `summary` 并规范化 id 前缀，因此同一会话双向切换不会报 400。桌面端为 DeepSeek 显示 `high` / `xhigh`，路由器会把 DeepSeek 的 `xhigh` 转为上游实际使用的 `max`；其他请求保持原样。
+DeepSeek 历史条目的推理文本和 id 格式与官方不同。转发给 ChatGPT 前，路由器会自动把推理文本转换到 `summary` 并规范化 id 前缀，因此同一会话双向切换不会报 400。DeepSeek 的推理档位与官方目录一致（`low` / `high` / `max`），路由器同时兼容 `xhigh` → `max` 的转换；其他请求保持原样。
 
 ## 安全边界
 
