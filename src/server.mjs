@@ -105,15 +105,18 @@ function sanitizeChatGptPayload(payload) {
   return changed;
 }
 
-// Codex desktop exposes xhigh for custom models but may hide max. Advertise
-// xhigh in the local catalog, then translate it to DeepSeek's real max tier.
+// DeepSeek 不在 Codex 中暴露档位选择；无论请求原档位为何（或是否存在），
+// 都在转发前强制使用官方 max。GPT 路由不经过此函数。
 function normalizeDeepSeekPayload(payload) {
   let changed = false;
-  if (payload?.reasoning?.effort === "xhigh") {
+  if (!payload.reasoning || typeof payload.reasoning !== "object" || Array.isArray(payload.reasoning)) {
+    payload.reasoning = { effort: "max" };
+    changed = true;
+  } else if (payload.reasoning.effort !== "max") {
     payload.reasoning.effort = "max";
     changed = true;
   }
-  if (payload?.reasoning_effort === "xhigh") {
+  if (payload?.reasoning_effort !== undefined && payload.reasoning_effort !== "max") {
     payload.reasoning_effort = "max";
     changed = true;
   }

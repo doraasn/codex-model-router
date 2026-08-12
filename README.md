@@ -11,8 +11,8 @@
 - 路由器仅监听 `127.0.0.1:4010`，只接受 `POST /v1/responses`、`POST /responses` 与 `GET /healthz`。
 - 按请求体 `model` 字段路由：`gpt-*` / `codex-*` 转发到 ChatGPT Codex 后端（沿用 `%USERPROFILE%\.codex\auth.json` 登录态）；`deepseek-v4-flash` 转发到 DeepSeek Responses API（凭据来自环境变量 `DEEPSEEK_API_KEY`）。
 - GPT 路由执行历史兼容清洗：第三方历史条目 id 规范化到官方类型前缀（`msg_`/`rs_`/`fc_`/`fco_`/`ctc_`/`ctco_`/`ws_`），`reasoning.content` 中的推理文本迁移到 `summary` 并清空 `content`。
-- DeepSeek 路由执行两项转换，其余字段原样透传：`reasoning.effort` / `reasoning_effort` 的 `xhigh` 转为官方 `max`；删除 `service_tier` / `serviceTier`（DeepSeek 无服务档位概念）。
-- 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)），构建时只覆盖两个字段：`display_name = "DS-V4-Flash"`，以及 `supported_reasoning_levels = high / xhigh`。原因：Codex 桌面端会过滤第三方模型的 `max` 档，`xhigh` 可在界面正常显示，由路由器在 DeepSeek 路线上转回官方 `max`。
+- DeepSeek 路由执行两项转换，其余字段原样透传：无论请求原档位为何或是否携带档位，都强制使用官方 `max`；删除 `service_tier` / `serviceTier`（DeepSeek 无服务档位概念）。
+- 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)），构建时清空推理档位列表，使 DeepSeek 不显示档位选择；实际请求由路由器固定为官方 `max`。
 
 ## 前置条件
 
@@ -142,7 +142,7 @@ node .\scripts\migrate-sessions.mjs
 ### 6. 验证
 
 - 健康检查：`Test-Router.ps1`，或访问 http://127.0.0.1:4010/healthz
-- 模型列表出现 GPT 与 `DS-V4-Flash`，推理档位为 high / xhigh 两档
+- 模型列表出现 GPT 与 `DS-V4-Flash`，DeepSeek 不提供推理档位选择（始终调用官方 max）
 - 发送消息后查看 `logs\router.out.log`（前台模式）：GPT 请求 `route=chatgpt`，DeepSeek 请求 `route=deepseek`，状态 200
 - 4010 端口被占用：更换端口后同步修改 `config\router.config.json` 与 Codex 配置中的 `base_url`
 
@@ -170,4 +170,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Stop-Router.ps1
 npm test
 ```
 
-共 7 项测试：凭据隔离、xhigh→max 转换、service tier 剥离、推理清洗、id 规范化、未知模型拒绝、凭据缺失 fail closed。测试使用本地模拟上游，不访问真实 API。
+共 7 项测试：凭据隔离、DeepSeek 强制 max、service tier 剥离、推理清洗、id 规范化、未知模型拒绝、凭据缺失 fail closed。测试使用本地模拟上游，不访问真实 API。

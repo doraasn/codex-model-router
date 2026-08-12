@@ -79,7 +79,7 @@ test("routes GPT and DeepSeek without crossing credentials", async (t) => {
   assert.equal(deepSeekReceived[0].accountId, undefined);
 });
 
-test("maps xhigh to max only on the DeepSeek route", async (t) => {
+test("forces max for every DeepSeek request and leaves GPT effort unchanged", async (t) => {
   const chatGptReceived = [];
   const deepSeekReceived = [];
   const chatGptServer = mockUpstream(chatGptReceived);
@@ -120,16 +120,29 @@ test("maps xhigh to max only on the DeepSeek route", async (t) => {
   assert.equal(gptResponse.status, 200);
   await gptResponse.text();
 
-  const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ model: "deepseek-v4-flash", input: "hello", reasoning: { effort: "xhigh" } }),
-  });
-  assert.equal(deepSeekResponse.status, 200);
-  await deepSeekResponse.text();
+  const deepSeekPayloads = [
+    { model: "deepseek-v4-flash", input: "missing effort" },
+    { model: "deepseek-v4-flash", input: "low effort", reasoning: { effort: "low" } },
+    { model: "deepseek-v4-flash", input: "high effort", reasoning: { effort: "high" } },
+    { model: "deepseek-v4-flash", input: "old xhigh effort", reasoning: { effort: "xhigh" } },
+    { model: "deepseek-v4-flash", input: "legacy field", reasoning_effort: "low" },
+  ];
+  for (const payload of deepSeekPayloads) {
+    const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+  }
 
   assert.equal(chatGptReceived[0].body.reasoning.effort, "xhigh");
-  assert.equal(deepSeekReceived[0].body.reasoning.effort, "max");
+  assert.equal(deepSeekReceived.length, deepSeekPayloads.length);
+  for (const request of deepSeekReceived) {
+    assert.equal(request.body.reasoning.effort, "max");
+  }
+  assert.equal(deepSeekReceived.at(-1).body.reasoning_effort, "max");
 });
 
 test("strips service tier only on the DeepSeek route", async (t) => {
