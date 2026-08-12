@@ -35,6 +35,7 @@
 | `scripts/Setup-Codex.ps1` | 自动备份并合并 Codex 配置 |
 | `scripts/migrate-sessions.mjs` | 迁移历史会话的 `model_provider` 标签 |
 | `scripts/Start-Router.ps1` / `Start-Background.ps1` / `Stop-Router.ps1` / `Test-Router.ps1` | 路由器启停与健康检查 |
+| `scripts/Enable-Autostart.ps1` / `enable-autostart.bat` | 注册当前用户登录后自动启动路由器 |
 | `start-router.bat` | 根目录入口：已运行则自动重启，未运行则后台启动 |
 
 ## 部署步骤
@@ -78,6 +79,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-Router.ps1
 ```
 
 代码更新后必须手动重启路由器才生效。
+
+#### 登录后自动启动（可选）
+
+双击 `scripts\enable-autostart.bat`，或执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Enable-Autostart.ps1
+```
+
+脚本会在当前用户的 Windows 登录启动项中注册 `CodexModelRouter`，随后立即启动路由并执行健康检查。无需管理员权限，重复运行会覆盖原启动项且不会创建重复路由进程。
 
 ### 4. 配置 Codex
 
