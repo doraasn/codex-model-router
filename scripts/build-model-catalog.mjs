@@ -44,12 +44,19 @@ function normalizeModel(model) {
 }
 
 // 以 DeepSeek 官方目录为基准（完整 GPT-5 harness、freeform apply_patch、
-// 官方上下文窗口等），覆盖两个有意调整的字段：显示名简化，以及不向 Codex
-// 暴露推理档位选择。路由器会在 DeepSeek 路线上无条件使用官方 max。
+// 官方上下文窗口等），覆盖显示名与 Codex 档位：Pro 暴露中/高/极高，路由器
+// 分别映射为官方 low/high/max；Flash 不暴露档位并始终使用官方 max。
 const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
   const model = structuredClone(officialModel);
-  model.display_name = officialModel.slug === "deepseek-v4-pro" ? "DS-V4-Pro" : "DS-V4-Flash";
-  model.supported_reasoning_levels = [];
+  const isPro = officialModel.slug === "deepseek-v4-pro";
+  model.display_name = isPro ? "DS-V4-Pro" : "DS-V4-Flash";
+  model.supported_reasoning_levels = isPro
+    ? [
+        { effort: "medium", description: "Maps to DeepSeek low" },
+        { effort: "high", description: "Maps to DeepSeek high" },
+        { effort: "xhigh", description: "Maps to DeepSeek max" },
+      ]
+    : [];
   return model;
 });
 

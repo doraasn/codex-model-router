@@ -105,20 +105,38 @@ function sanitizeChatGptPayload(payload) {
   return changed;
 }
 
-// DeepSeek 不在 Codex 中暴露档位选择；无论请求原档位为何（或是否存在），
-// 都在转发前强制使用官方 max。GPT 路由不经过此函数。
+const PRO_REASONING_EFFORT_MAP = new Map([
+  ["low", "low"],
+  ["medium", "low"],
+  ["high", "high"],
+  ["xhigh", "max"],
+  ["max", "max"],
+]);
+
+// Pro 将 Codex 的中/高/极高映射为官方 low/high/max；缺省或未知档位回退 high。
+// Flash 不暴露档位选择，并在转发前无条件使用官方 max。GPT 不经过此函数。
 function normalizeDeepSeekPayload(payload) {
   let changed = false;
+  const isPro = payload.model === "deepseek-v4-pro";
+  const mapEffort = (effort) => isPro
+    ? (PRO_REASONING_EFFORT_MAP.get(effort) || "high")
+    : "max";
   if (!payload.reasoning || typeof payload.reasoning !== "object" || Array.isArray(payload.reasoning)) {
-    payload.reasoning = { effort: "max" };
+    payload.reasoning = { effort: mapEffort(undefined) };
     changed = true;
-  } else if (payload.reasoning.effort !== "max") {
-    payload.reasoning.effort = "max";
-    changed = true;
+  } else {
+    const mappedEffort = mapEffort(payload.reasoning.effort);
+    if (payload.reasoning.effort !== mappedEffort) {
+      payload.reasoning.effort = mappedEffort;
+      changed = true;
+    }
   }
-  if (payload?.reasoning_effort !== undefined && payload.reasoning_effort !== "max") {
-    payload.reasoning_effort = "max";
-    changed = true;
+  if (payload?.reasoning_effort !== undefined) {
+    const mappedLegacyEffort = mapEffort(payload.reasoning_effort);
+    if (payload.reasoning_effort !== mappedLegacyEffort) {
+      payload.reasoning_effort = mappedLegacyEffort;
+      changed = true;
+    }
   }
   // DeepSeek 官方没有服务档位概念；防御性剥离 Codex 可能带上的 service_tier。
   if (payload?.service_tier !== undefined) {

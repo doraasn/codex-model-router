@@ -86,7 +86,7 @@ test("routes GPT and DeepSeek without crossing credentials", async (t) => {
   }
 });
 
-test("forces max for every DeepSeek request and leaves GPT effort unchanged", async (t) => {
+test("maps Pro efforts, forces Flash max, and leaves GPT effort unchanged", async (t) => {
   const chatGptReceived = [];
   const deepSeekReceived = [];
   const chatGptServer = mockUpstream(chatGptReceived);
@@ -128,14 +128,16 @@ test("forces max for every DeepSeek request and leaves GPT effort unchanged", as
   await gptResponse.text();
 
   const deepSeekPayloads = [
-    { model: "deepseek-v4-pro", input: "pro missing effort" },
-    { model: "deepseek-v4-flash", input: "missing effort" },
-    { model: "deepseek-v4-flash", input: "low effort", reasoning: { effort: "low" } },
-    { model: "deepseek-v4-flash", input: "high effort", reasoning: { effort: "high" } },
-    { model: "deepseek-v4-flash", input: "old xhigh effort", reasoning: { effort: "xhigh" } },
-    { model: "deepseek-v4-flash", input: "legacy field", reasoning_effort: "low" },
+    { payload: { model: "deepseek-v4-pro", input: "pro medium", reasoning: { effort: "medium" } }, expected: "low" },
+    { payload: { model: "deepseek-v4-pro", input: "pro high", reasoning: { effort: "high" } }, expected: "high" },
+    { payload: { model: "deepseek-v4-pro", input: "pro xhigh", reasoning: { effort: "xhigh" } }, expected: "max" },
+    { payload: { model: "deepseek-v4-pro", input: "pro missing effort" }, expected: "high" },
+    { payload: { model: "deepseek-v4-flash", input: "flash missing effort" }, expected: "max" },
+    { payload: { model: "deepseek-v4-flash", input: "flash low", reasoning: { effort: "low" } }, expected: "max" },
+    { payload: { model: "deepseek-v4-flash", input: "flash high", reasoning: { effort: "high" } }, expected: "max" },
+    { payload: { model: "deepseek-v4-flash", input: "flash legacy", reasoning_effort: "low" }, expected: "max", legacy: "max" },
   ];
-  for (const payload of deepSeekPayloads) {
+  for (const { payload } of deepSeekPayloads) {
     const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
       method: "POST",
       headers,
@@ -147,10 +149,12 @@ test("forces max for every DeepSeek request and leaves GPT effort unchanged", as
 
   assert.equal(chatGptReceived[0].body.reasoning.effort, "xhigh");
   assert.equal(deepSeekReceived.length, deepSeekPayloads.length);
-  for (const request of deepSeekReceived) {
-    assert.equal(request.body.reasoning.effort, "max");
+  for (const [index, request] of deepSeekReceived.entries()) {
+    assert.equal(request.body.reasoning.effort, deepSeekPayloads[index].expected);
+    if (deepSeekPayloads[index].legacy) {
+      assert.equal(request.body.reasoning_effort, deepSeekPayloads[index].legacy);
+    }
   }
-  assert.equal(deepSeekReceived.at(-1).body.reasoning_effort, "max");
 });
 
 test("strips service tier only on the DeepSeek route", async (t) => {
