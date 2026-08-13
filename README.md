@@ -80,6 +80,47 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-Router.ps1
 
 代码更新后必须手动重启路由器才生效。
 
+#### 通过代理访问上游（可选）
+
+如果访问 ChatGPT 或 DeepSeek API 需要代理，应为 Node.js 配置环境代理。仅打开 Windows“系统代理”不能保证 Node.js 的 `fetch` 使用代理；Node.js 24 需要同时设置 `NODE_USE_ENV_PROXY=1`。
+
+以下示例适用于 Clash、Mihomo 等提供的 HTTP/Mixed 代理端口 `127.0.0.1:7897`。在 PowerShell 中执行一次，将配置永久写入当前 Windows 用户：
+
+```powershell
+[Environment]::SetEnvironmentVariable('NODE_USE_ENV_PROXY', '1', 'User')
+[Environment]::SetEnvironmentVariable('HTTP_PROXY', 'http://127.0.0.1:7897', 'User')
+[Environment]::SetEnvironmentVariable('HTTPS_PROXY', 'http://127.0.0.1:7897', 'User')
+[Environment]::SetEnvironmentVariable('NO_PROXY', 'localhost,127.0.0.1,::1', 'User')
+```
+
+`HTTPS_PROXY` 的值写成 `http://...` 是正常的：它表示通过 HTTP 代理的 CONNECT 隧道访问 HTTPS 上游。这里应填写代理软件的 HTTP 或 Mixed 端口；不要填写仅支持 SOCKS 的端口。`NO_PROXY` 必须包含本地回环地址，确保 Codex 到 `127.0.0.1:4010` 的请求不会绕到代理。
+
+环境变量只会被新进程读取。配置后重启路由器；如果使用登录自启动，注销并重新登录也会生效：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Stop-Router.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-Background.ps1
+```
+
+检查代理端口与路由连接（把 `7897` 改成实际端口）：
+
+```powershell
+Get-NetTCPConnection -LocalPort 7897 -State Listen
+$routerPid = (Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 4010 -State Listen).OwningProcess
+Get-NetTCPConnection -OwningProcess $routerPid -State Established
+```
+
+若输出中出现路由进程连接到 `127.0.0.1:7897`，表示上游请求正在经过代理。还应分别发送一次 GPT 和 DeepSeek 请求，确认 `logs\router.out.log` 中两条路由均返回 200。
+
+不再使用代理时，删除当前用户的永久配置并重启路由器：
+
+```powershell
+[Environment]::SetEnvironmentVariable('NODE_USE_ENV_PROXY', $null, 'User')
+[Environment]::SetEnvironmentVariable('HTTP_PROXY', $null, 'User')
+[Environment]::SetEnvironmentVariable('HTTPS_PROXY', $null, 'User')
+[Environment]::SetEnvironmentVariable('NO_PROXY', $null, 'User')
+```
+
 #### 登录后自动启动（可选）
 
 双击 `scripts\enable-autostart.bat`，或执行：
