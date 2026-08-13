@@ -6,6 +6,7 @@
   "chatgptBaseUrl": "https://chatgpt.com/backend-api/codex/",
   "deepseekBaseUrl": "https://api.deepseek.com/",
   "deepseekModels": [
+    "deepseek-v4-pro",
     "deepseek-v4-flash"
   ],
   "gptModelPrefixes": [

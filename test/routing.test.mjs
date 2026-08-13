@@ -4,6 +4,8 @@ import { once } from "node:events";
 import test from "node:test";
 import { createRouterServer } from "../src/server.mjs";
 
+const DEEPSEEK_MODELS = new Set(["deepseek-v4-pro", "deepseek-v4-flash"]);
+
 function listen(server) {
   server.listen(0, "127.0.0.1");
   return once(server, "listening").then(() => server.address().port);
@@ -45,7 +47,7 @@ test("routes GPT and DeepSeek without crossing credentials", async (t) => {
       requestTimeoutMs: 5000,
       chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
       deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: new Set(["deepseek-v4-flash"]),
+      deepseekModels: DEEPSEEK_MODELS,
       gptModelPrefixes: ["gpt-", "codex-"],
     },
   });
@@ -65,18 +67,23 @@ test("routes GPT and DeepSeek without crossing credentials", async (t) => {
   assert.equal(gptResponse.status, 200);
   assert.match(await gptResponse.text(), /response.completed/);
 
-  const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
-    method: "POST",
-    headers: commonHeaders,
-    body: JSON.stringify({ model: "deepseek-v4-flash", input: "hello" }),
-  });
-  assert.equal(deepSeekResponse.status, 200);
-  assert.match(await deepSeekResponse.text(), /response.completed/);
+  for (const model of DEEPSEEK_MODELS) {
+    const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+      method: "POST",
+      headers: commonHeaders,
+      body: JSON.stringify({ model, input: "hello" }),
+    });
+    assert.equal(deepSeekResponse.status, 200);
+    assert.match(await deepSeekResponse.text(), /response.completed/);
+  }
 
   assert.equal(chatGptReceived[0].authorization, "Bearer chatgpt-test-token");
   assert.equal(chatGptReceived[0].accountId, "account-test");
-  assert.equal(deepSeekReceived[0].authorization, "Bearer deepseek-test-key");
-  assert.equal(deepSeekReceived[0].accountId, undefined);
+  assert.equal(deepSeekReceived.length, 2);
+  for (const request of deepSeekReceived) {
+    assert.equal(request.authorization, "Bearer deepseek-test-key");
+    assert.equal(request.accountId, undefined);
+  }
 });
 
 test("forces max for every DeepSeek request and leaves GPT effort unchanged", async (t) => {
@@ -100,7 +107,7 @@ test("forces max for every DeepSeek request and leaves GPT effort unchanged", as
       requestTimeoutMs: 5000,
       chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
       deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: new Set(["deepseek-v4-flash"]),
+      deepseekModels: DEEPSEEK_MODELS,
       gptModelPrefixes: ["gpt-", "codex-"],
     },
   });
@@ -121,6 +128,7 @@ test("forces max for every DeepSeek request and leaves GPT effort unchanged", as
   await gptResponse.text();
 
   const deepSeekPayloads = [
+    { model: "deepseek-v4-pro", input: "pro missing effort" },
     { model: "deepseek-v4-flash", input: "missing effort" },
     { model: "deepseek-v4-flash", input: "low effort", reasoning: { effort: "low" } },
     { model: "deepseek-v4-flash", input: "high effort", reasoning: { effort: "high" } },
@@ -166,7 +174,7 @@ test("strips service tier only on the DeepSeek route", async (t) => {
       requestTimeoutMs: 5000,
       chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
       deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: new Set(["deepseek-v4-flash"]),
+      deepseekModels: DEEPSEEK_MODELS,
       gptModelPrefixes: ["gpt-", "codex-"],
     },
   });
@@ -220,7 +228,7 @@ test("sanitizes DeepSeek reasoning content only on the ChatGPT route", async (t)
       requestTimeoutMs: 5000,
       chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
       deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: new Set(["deepseek-v4-flash"]),
+      deepseekModels: DEEPSEEK_MODELS,
       gptModelPrefixes: ["gpt-", "codex-"],
     },
   });
@@ -293,7 +301,7 @@ test("normalizes third-party item ids on the ChatGPT route and keeps call_id pai
       requestTimeoutMs: 5000,
       chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
       deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: new Set(["deepseek-v4-flash"]),
+      deepseekModels: DEEPSEEK_MODELS,
       gptModelPrefixes: ["gpt-", "codex-"],
     },
   });
@@ -365,7 +373,7 @@ test("rejects unsupported models", async (t) => {
       requestTimeoutMs: 1000,
       chatgptBaseUrl: "http://127.0.0.1:9/codex/",
       deepseekBaseUrl: "http://127.0.0.1:9/",
-      deepseekModels: new Set(["deepseek-v4-flash"]),
+      deepseekModels: DEEPSEEK_MODELS,
       gptModelPrefixes: ["gpt-", "codex-"],
     },
   });
@@ -390,7 +398,7 @@ test("fails closed when route credentials are missing", async (t) => {
       requestTimeoutMs: 1000,
       chatgptBaseUrl: "http://127.0.0.1:9/codex/",
       deepseekBaseUrl: "http://127.0.0.1:9/",
-      deepseekModels: new Set(["deepseek-v4-flash"]),
+      deepseekModels: DEEPSEEK_MODELS,
       gptModelPrefixes: ["gpt-", "codex-"],
     },
   });

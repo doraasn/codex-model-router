@@ -18,15 +18,14 @@ if (!Array.isArray(catalog.models) || catalog.models.length === 0) {
   throw new Error("The Codex model cache contains no models");
 }
 
-const template = catalog.models.find((model) => model.slug === "gpt-5.6-sol") || catalog.models[0];
 const officialDeepSeekPath = fileURLToPath(new URL("../config/deepseek-official-catalog.json", import.meta.url));
 const officialDeepSeekCatalog = JSON.parse(await readFile(officialDeepSeekPath, "utf8"));
-const officialFlash = (officialDeepSeekCatalog.models || []).find(
-  (model) => model.slug === "deepseek-v4-flash",
-);
-if (!officialFlash) {
-  throw new Error("DeepSeek official catalog is missing deepseek-v4-flash");
-}
+const deepSeekSlugs = ["deepseek-v4-pro", "deepseek-v4-flash"];
+const officialDeepSeekModels = deepSeekSlugs.map((slug) => {
+  const model = (officialDeepSeekCatalog.models || []).find((candidate) => candidate.slug === slug);
+  if (!model) throw new Error(`DeepSeek official catalog is missing ${slug}`);
+  return model;
+});
 const hiddenCompatibilityModels = new Set([
   "codex-auto-review",
   "gpt-5.4",
@@ -47,16 +46,39 @@ function normalizeModel(model) {
 // 以 DeepSeek 官方目录为基准（完整 GPT-5 harness、freeform apply_patch、
 // 官方上下文窗口等），覆盖两个有意调整的字段：显示名简化，以及不向 Codex
 // 暴露推理档位选择。路由器会在 DeepSeek 路线上无条件使用官方 max。
-const deepSeek = structuredClone(officialFlash);
-deepSeek.display_name = "DS-V4-Flash";
-deepSeek.supported_reasoning_levels = [];
+const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
+  const model = structuredClone(officialModel);
+  model.display_name = officialModel.slug === "deepseek-v4-pro" ? "DS-V4-Pro" : "DS-V4-Flash";
+  model.supported_reasoning_levels = [];
+  return model;
+});
+
+const preferredOrder = new Map([
+  ["gpt-5.6-sol", 0],
+  ["gpt-5.6-terra", 1],
+  ["gpt-5.6-luna", 2],
+  ["deepseek-v4-pro", 3],
+  ["deepseek-v4-flash", 4],
+]);
 
 const models = catalog.models
-  .filter((model) => model.slug !== deepSeek.slug)
+  .filter((model) => !deepSeekSlugs.includes(model.slug))
   .map(normalizeModel)
   .map((model) => hiddenCompatibilityModels.has(model.slug)
     ? { ...model, visibility: "hide" }
     : model);
-models.push(deepSeek);
+models.push(...deepSeekModels);
+models.sort((left, right) => {
+  const leftRank = preferredOrder.get(left.slug);
+  const rightRank = preferredOrder.get(right.slug);
+  if (leftRank !== undefined || rightRank !== undefined) {
+    return (leftRank ?? Number.MAX_SAFE_INTEGER) - (rightRank ?? Number.MAX_SAFE_INTEGER);
+  }
+  const visibilityOrder = (left.visibility === "list" ? 0 : 1) - (right.visibility === "list" ? 0 : 1);
+  return visibilityOrder || (left.priority ?? 999) - (right.priority ?? 999);
+});
+models.forEach((model, index) => {
+  model.priority = index + 1;
+});
 await writeFile(outputPath, `${JSON.stringify({ models }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 process.stdout.write(`Wrote ${models.length} models to ${outputPath}\n`);

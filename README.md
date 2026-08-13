@@ -9,7 +9,7 @@
 ## 架构
 
 - 路由器仅监听 `127.0.0.1:4010`，只接受 `POST /v1/responses`、`POST /responses` 与 `GET /healthz`。
-- 按请求体 `model` 字段路由：`gpt-*` / `codex-*` 转发到 ChatGPT Codex 后端（沿用 `%USERPROFILE%\.codex\auth.json` 登录态）；`deepseek-v4-flash` 转发到 DeepSeek Responses API（凭据来自环境变量 `DEEPSEEK_API_KEY`）。
+- 按请求体 `model` 字段路由：`gpt-*` / `codex-*` 转发到 ChatGPT Codex 后端（沿用 `%USERPROFILE%\.codex\auth.json` 登录态）；`deepseek-v4-pro` / `deepseek-v4-flash` 转发到 DeepSeek Responses API（凭据来自环境变量 `DEEPSEEK_API_KEY`）。
 - GPT 路由执行历史兼容清洗：第三方历史条目 id 规范化到官方类型前缀（`msg_`/`rs_`/`fc_`/`fco_`/`ctc_`/`ctco_`/`ws_`），`reasoning.content` 中的推理文本迁移到 `summary` 并清空 `content`。
 - DeepSeek 路由执行两项转换，其余字段原样透传：无论请求原档位为何或是否携带档位，都强制使用官方 `max`；删除 `service_tier` / `serviceTier`（DeepSeek 无服务档位概念）。
 - 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)），构建时清空推理档位列表，使 DeepSeek 不显示档位选择；实际请求由路由器固定为官方 `max`。
@@ -20,7 +20,7 @@
 - Codex 已通过 ChatGPT 登录（`codex login` 或桌面端登录），保证 `auth.json` 存在
 - 一个新的 DeepSeek API Key
 
-当前只声明 `deepseek-v4-flash` 可用于 Codex；不要在官方支持前手动开启 `deepseek-v4-pro`。
+当前声明 DeepSeek 官方支持的 `deepseek-v4-pro` 与 `deepseek-v4-flash`。两者均不显示推理档位选择，路由固定使用官方 `max`。
 
 ## 关键文件
 
@@ -46,7 +46,7 @@
 node .\scripts\build-model-catalog.mjs
 ```
 
-读取 `%USERPROFILE%\.codex\models_cache.json`，保留当前 GPT 模型并加入 DeepSeek 条目，输出到 `config\models.json`。该文件已被 Git 忽略，每台机器需自行生成；若 `models_cache.json` 不存在，先启动一次 Codex 再退出，然后重跑。
+读取 `%USERPROFILE%\.codex\models_cache.json`，保留当前 GPT 模型并加入 DeepSeek Pro/Flash，输出到 `config\models.json`。模型顺序固定为 Sol、Terra、Luna、Pro、Flash，其余模型随后按原优先级排列。该文件已被 Git 忽略，每台机器需自行生成；若 `models_cache.json` 不存在，先启动一次 Codex 再退出，然后重跑。
 
 ### 2. 保存 DeepSeek Key（明文）
 
@@ -142,7 +142,7 @@ node .\scripts\migrate-sessions.mjs
 ### 6. 验证
 
 - 健康检查：`Test-Router.ps1`，或访问 http://127.0.0.1:4010/healthz
-- 模型列表出现 GPT 与 `DS-V4-Flash`，DeepSeek 不提供推理档位选择（始终调用官方 max）
+- 模型列表前五项依次为 Sol、Terra、Luna、`DS-V4-Pro`、`DS-V4-Flash`；DeepSeek 不提供推理档位选择（始终调用官方 max）
 - 发送消息后查看 `logs\router.out.log`（前台模式）：GPT 请求 `route=chatgpt`，DeepSeek 请求 `route=deepseek`，状态 200
 - 4010 端口被占用：更换端口后同步修改 `config\router.config.json` 与 Codex 配置中的 `base_url`
 
