@@ -75,13 +75,20 @@ const ITEM_ID_PREFIXES = {
 // 2. 官方后端要求 reasoning 条目的 content 必须为空数组，推理摘要只能走 summary 字段；
 //    把 DeepSeek 放在 content（reasoning_text）里的推理文本统一挪到 summary 并清空 content。
 // 3. GPT-5.6 系列使用 prompt_cache_options，不接受旧的 prompt_cache_retention；
-//    删除该字段以避免 Luna 等 GPT-5.6 模型返回 invalid_parameter。
+//    递归删除该字段，兼容历史请求或扩展对象中残留的旧参数。
 function sanitizeChatGptPayload(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
   let changed = false;
-  if (Object.prototype.hasOwnProperty.call(payload, "prompt_cache_retention")) {
-    delete payload.prompt_cache_retention;
-    changed = true;
+  const pending = [payload];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (Object.prototype.hasOwnProperty.call(current, "prompt_cache_retention")) {
+      delete current.prompt_cache_retention;
+      changed = true;
+    }
+    for (const value of Object.values(current)) {
+      if (value && typeof value === "object") pending.push(value);
+    }
   }
   if (!Array.isArray(payload.input)) return changed;
   for (const item of payload.input) {
@@ -161,13 +168,25 @@ function buildChatGptHeaders(incomingHeaders) {
   const headers = new Headers();
   for (const [name, rawValue] of Object.entries(incomingHeaders)) {
     const lowerName = name.toLowerCase();
-    if (HOP_BY_HOP_HEADERS.has(lowerName) || rawValue === undefined) continue;
+    const normalizedName = lowerName.replaceAll("_", "-");
+    if (
+      HOP_BY_HOP_HEADERS.has(lowerName)
+      || normalizedName.includes("prompt-cache-retention")
+      || rawValue === undefined
+    ) continue;
     const value = Array.isArray(rawValue) ? rawValue.join(", ") : rawValue;
     headers.set(name, value);
   }
   headers.set("content-type", "application/json");
   headers.set("accept", "text/event-stream, application/json");
   return headers;
+}
+
+function isPromptCacheRetentionError(upstream) {
+  if (upstream.status !== 400) return false;
+  return upstream.clone().json()
+    .then((body) => body?.error?.param === "prompt_cache_retention")
+    .catch(() => false);
 }
 
 function buildDeepSeekHeaders(apiKey, incomingHeaders) {
@@ -262,13 +281,36 @@ export async function createRouterServer(overrides = {}) {
           route === "deepseek"
             ? buildDeepSeekHeaders(deepSeekKey, request.headers)
             : buildChatGptHeaders(request.headers);
-        const upstream = await fetch(upstreamUrl(baseUrl, request.url), {
+        const targetUrl = upstreamUrl(baseUrl, request.url);
+        let upstream = await fetch(targetUrl, {
           method: "POST",
           headers,
           body: requestBody,
           signal: controller.signal,
           redirect: "error",
         });
+
+        // ChatGPT 后端偶尔会对带 prompt_cache_key 的 GPT-5.6 长会话后续请求返回
+        // prompt_cache_retention 兼容错误。仅在上游明确返回该参数错误时，去掉
+        // 缓存亲和键重试一次；其他 400 原样返回，DeepSeek 路由也不参与重试。
+        if (
+          route === "chatgpt"
+          && Object.prototype.hasOwnProperty.call(payload, "prompt_cache_key")
+          && await isPromptCacheRetentionError(upstream)
+        ) {
+          delete payload.prompt_cache_key;
+          requestBody = Buffer.from(JSON.stringify(payload), "utf8");
+          process.stdout.write(
+            `${new Date().toISOString()} route=chatgpt model=${model} retry=without_prompt_cache_key\n`,
+          );
+          upstream = await fetch(targetUrl, {
+            method: "POST",
+            headers,
+            body: requestBody,
+            signal: controller.signal,
+            redirect: "error",
+          });
+        }
 
         response.statusCode = upstream.status;
         copyResponseHeaders(upstream, response);

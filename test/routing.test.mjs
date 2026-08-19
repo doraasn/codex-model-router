@@ -18,6 +18,7 @@ function mockUpstream(received) {
     received.push({
       authorization: request.headers.authorization,
       accountId: request.headers["chatgpt-account-id"],
+      headers: { ...request.headers },
       body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
     });
     response.writeHead(200, { "content-type": "text/event-stream" });
@@ -211,9 +212,90 @@ test("strips service tier only on the DeepSeek route", async (t) => {
   assert.equal("service_tier" in deepSeekReceived[0].body, false);
 });
 
-test("removes legacy prompt cache retention on the ChatGPT route", async (t) => {
+test("removes legacy prompt cache retention fields and headers only on the ChatGPT route", async (t) => {
   const chatGptReceived = [];
+  const deepSeekReceived = [];
   const chatGptServer = mockUpstream(chatGptReceived);
+  const deepSeekServer = mockUpstream(deepSeekReceived);
+  const chatGptPort = await listen(chatGptServer);
+  const deepSeekPort = await listen(deepSeekServer);
+  t.after(() => chatGptServer.close());
+  t.after(() => deepSeekServer.close());
+
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  t.after(() => delete process.env.DEEPSEEK_API_KEY);
+
+  const router = await createRouterServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      maxBodyBytes: 1024 * 1024,
+      requestTimeoutMs: 5000,
+      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
+      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
+      deepseekModels: DEEPSEEK_MODELS,
+      gptModelPrefixes: ["gpt-", "codex-"],
+    },
+  });
+  const routerPort = await listen(router);
+  t.after(() => router.close());
+
+  const headers = {
+    authorization: "Bearer chatgpt-test-token",
+    "content-type": "application/json",
+    "x-prompt-cache-retention": "24h",
+  };
+  const legacyCacheOptions = {
+    prompt_cache_retention: "24h",
+    nested: { prompt_cache_retention: "1h", keep: true },
+  };
+  const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", ...legacyCacheOptions }),
+  });
+  assert.equal(response.status, 200);
+  await response.text();
+
+  assert.equal(chatGptReceived.length, 1);
+  assert.equal("prompt_cache_retention" in chatGptReceived[0].body, false);
+  assert.equal("prompt_cache_retention" in chatGptReceived[0].body.nested, false);
+  assert.equal(chatGptReceived[0].body.nested.keep, true);
+  assert.equal(chatGptReceived[0].headers["x-prompt-cache-retention"], undefined);
+
+  const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "deepseek-v4-flash", input: "hello", ...legacyCacheOptions }),
+  });
+  assert.equal(deepSeekResponse.status, 200);
+  await deepSeekResponse.text();
+  assert.equal(deepSeekReceived[0].body.prompt_cache_retention, "24h");
+  assert.equal(deepSeekReceived[0].body.nested.prompt_cache_retention, "1h");
+});
+
+test("retries a ChatGPT cache retention error once without prompt_cache_key", async (t) => {
+  const received = [];
+  const chatGptServer = http.createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    received.push(body);
+    if (body.prompt_cache_key) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: {
+          message: "prompt_cache_retention is not supported on this model",
+          type: "invalid_request_error",
+          param: "prompt_cache_retention",
+          code: "invalid_parameter",
+        },
+      }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end('event: response.completed\ndata: {"type":"response.completed"}\n\n');
+  });
   const chatGptPort = await listen(chatGptServer);
   t.after(() => chatGptServer.close());
 
@@ -232,20 +314,19 @@ test("removes legacy prompt cache retention on the ChatGPT route", async (t) => 
   const routerPort = await listen(router);
   t.after(() => router.close());
 
-  const headers = {
-    authorization: "Bearer chatgpt-test-token",
-    "content-type": "application/json",
-  };
   const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
     method: "POST",
-    headers,
-    body: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", prompt_cache_retention: "24h" }),
+    headers: {
+      authorization: "Bearer chatgpt-test-token",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ model: "gpt-5.6-sol", input: "hello", prompt_cache_key: "thread-key" }),
   });
   assert.equal(response.status, 200);
-  await response.text();
-
-  assert.equal(chatGptReceived.length, 1);
-  assert.equal("prompt_cache_retention" in chatGptReceived[0].body, false);
+  assert.match(await response.text(), /response.completed/);
+  assert.equal(received.length, 2);
+  assert.equal(received[0].prompt_cache_key, "thread-key");
+  assert.equal("prompt_cache_key" in received[1], false);
 });
 
 test("sanitizes DeepSeek reasoning content only on the ChatGPT route", async (t) => {
