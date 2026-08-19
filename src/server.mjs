@@ -70,7 +70,7 @@ const ITEM_ID_PREFIXES = {
 };
 
 function isGpt56Model(model) {
-  return model === "gpt-5.6" || model.startsWith("gpt-5.6-");
+  return typeof model === "string" && /^(?:gpt|codex)-5\.6(?:-|$)/.test(model);
 }
 
 // 清洗发往 ChatGPT 后端的请求体，仅影响 ChatGPT 路由，DeepSeek 请求原样透传：
