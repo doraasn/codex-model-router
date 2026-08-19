@@ -69,14 +69,25 @@ const ITEM_ID_PREFIXES = {
   web_search_call: "ws_",
 };
 
+function isGpt56Model(model) {
+  return model === "gpt-5.6" || model.startsWith("gpt-5.6-");
+}
+
 // 清洗发往 ChatGPT 后端的请求体，仅影响 ChatGPT 路由，DeepSeek 请求原样透传：
 // 1. 把第三方历史条目的 id 确定性规范到官方要求的类型前缀（同一旧 id 每次映射一致）；
 //    call_id 保持原样，function_call_output/custom_tool_call_output 的配对关系不受影响。
 // 2. 官方后端要求 reasoning 条目的 content 必须为空数组，推理摘要只能走 summary 字段；
 //    把 DeepSeek 放在 content（reasoning_text）里的推理文本统一挪到 summary 并清空 content。
+// 3. GPT-5.6 系列使用 prompt_cache_options，不接受旧的 prompt_cache_retention；
+//    删除该字段以避免 Luna 等 GPT-5.6 模型返回 invalid_parameter。
 function sanitizeChatGptPayload(payload) {
-  if (!payload || !Array.isArray(payload.input)) return false;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
   let changed = false;
+  if (isGpt56Model(payload.model) && Object.prototype.hasOwnProperty.call(payload, "prompt_cache_retention")) {
+    delete payload.prompt_cache_retention;
+    changed = true;
+  }
+  if (!Array.isArray(payload.input)) return changed;
   for (const item of payload.input) {
     if (!item || typeof item !== "object") continue;
 
