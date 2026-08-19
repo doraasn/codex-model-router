@@ -211,7 +211,7 @@ test("strips service tier only on the DeepSeek route", async (t) => {
   assert.equal("service_tier" in deepSeekReceived[0].body, false);
 });
 
-test("removes legacy prompt cache retention for GPT-5.6 model aliases", async (t) => {
+test("removes legacy prompt cache retention on the ChatGPT route", async (t) => {
   const chatGptReceived = [];
   const chatGptServer = mockUpstream(chatGptReceived);
   const chatGptPort = await listen(chatGptServer);
@@ -236,20 +236,16 @@ test("removes legacy prompt cache retention for GPT-5.6 model aliases", async (t
     authorization: "Bearer chatgpt-test-token",
     "content-type": "application/json",
   };
-  for (const model of ["gpt-5.6-luna", "codex-5.6-luna"]) {
-    const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ model, input: "hello", prompt_cache_retention: "24h" }),
-    });
-    assert.equal(response.status, 200);
-    await response.text();
-  }
+  const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "gpt-5.6-luna", input: "hello", prompt_cache_retention: "24h" }),
+  });
+  assert.equal(response.status, 200);
+  await response.text();
 
-  assert.equal(chatGptReceived.length, 2);
-  for (const request of chatGptReceived) {
-    assert.equal("prompt_cache_retention" in request.body, false);
-  }
+  assert.equal(chatGptReceived.length, 1);
+  assert.equal("prompt_cache_retention" in chatGptReceived[0].body, false);
 });
 
 test("sanitizes DeepSeek reasoning content only on the ChatGPT route", async (t) => {

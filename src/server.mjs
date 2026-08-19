@@ -69,10 +69,6 @@ const ITEM_ID_PREFIXES = {
   web_search_call: "ws_",
 };
 
-function isGpt56Model(model) {
-  return typeof model === "string" && /^(?:gpt|codex)-5\.6(?:-|$)/.test(model);
-}
-
 // 清洗发往 ChatGPT 后端的请求体，仅影响 ChatGPT 路由，DeepSeek 请求原样透传：
 // 1. 把第三方历史条目的 id 确定性规范到官方要求的类型前缀（同一旧 id 每次映射一致）；
 //    call_id 保持原样，function_call_output/custom_tool_call_output 的配对关系不受影响。
@@ -83,7 +79,7 @@ function isGpt56Model(model) {
 function sanitizeChatGptPayload(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
   let changed = false;
-  if (isGpt56Model(payload.model) && Object.prototype.hasOwnProperty.call(payload, "prompt_cache_retention")) {
+  if (Object.prototype.hasOwnProperty.call(payload, "prompt_cache_retention")) {
     delete payload.prompt_cache_retention;
     changed = true;
   }
