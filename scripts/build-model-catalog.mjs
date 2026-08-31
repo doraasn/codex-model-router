@@ -50,7 +50,7 @@ const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
   const model = structuredClone(officialModel);
   const isPro = officialModel.slug === "deepseek-v4-pro";
   const isVision = officialModel.slug === "deepseek-v4-flash-vision-exp";
-  model.display_name = isPro ? "DS-V4-Pro" : isVision ? "DS-V4-Flash-Vision" : "DS-V4-Flash";
+  model.display_name = isPro ? "DS-V4-Pro" : isVision ? "DS-V4-Flash-VS" : "DS-V4-Flash";
   model.supported_reasoning_levels = isPro
     ? [
         { effort: "medium", description: "Maps to DeepSeek low" },
