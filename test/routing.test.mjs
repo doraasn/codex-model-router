@@ -4,7 +4,11 @@ import { once } from "node:events";
 import test from "node:test";
 import { createRouterServer } from "../src/server.mjs";
 
-const DEEPSEEK_MODELS = new Set(["deepseek-v4-pro", "deepseek-v4-flash"]);
+const DEEPSEEK_MODELS = new Set([
+  "deepseek-v4-pro",
+  "deepseek-v4-flash",
+  "deepseek-v4-flash-vision-exp",
+]);
 
 function listen(server) {
   server.listen(0, "127.0.0.1");
@@ -80,7 +84,7 @@ test("routes GPT and DeepSeek without crossing credentials", async (t) => {
 
   assert.equal(chatGptReceived[0].authorization, "Bearer chatgpt-test-token");
   assert.equal(chatGptReceived[0].accountId, "account-test");
-  assert.equal(deepSeekReceived.length, 2);
+  assert.equal(deepSeekReceived.length, DEEPSEEK_MODELS.size);
   for (const request of deepSeekReceived) {
     assert.equal(request.authorization, "Bearer deepseek-test-key");
     assert.equal(request.accountId, undefined);
@@ -137,6 +141,8 @@ test("maps Pro efforts, forces Flash max, and leaves GPT effort unchanged", asyn
     { payload: { model: "deepseek-v4-flash", input: "flash low", reasoning: { effort: "low" } }, expected: "max" },
     { payload: { model: "deepseek-v4-flash", input: "flash high", reasoning: { effort: "high" } }, expected: "max" },
     { payload: { model: "deepseek-v4-flash", input: "flash legacy", reasoning_effort: "low" }, expected: "max", legacy: "max" },
+    { payload: { model: "deepseek-v4-flash-vision-exp", input: "vision high", reasoning: { effort: "high" } }, expected: "max" },
+    { payload: { model: "deepseek-v4-flash-vision-exp", input: "vision legacy", reasoning_effort: "low" }, expected: "max", legacy: "max" },
   ];
   for (const { payload } of deepSeekPayloads) {
     const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {

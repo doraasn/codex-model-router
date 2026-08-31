@@ -9,10 +9,10 @@
 ## 架构
 
 - 路由器仅监听 `127.0.0.1:4010`，只接受 `POST /v1/responses`、`POST /responses` 与 `GET /healthz`。
-- 按请求体 `model` 字段路由：`gpt-*` / `codex-*` 转发到 ChatGPT Codex 后端（沿用 `%USERPROFILE%\.codex\auth.json` 登录态）；`deepseek-v4-pro` / `deepseek-v4-flash` 转发到 DeepSeek Responses API（凭据来自环境变量 `DEEPSEEK_API_KEY`）。
+- 按请求体 `model` 字段路由：`gpt-*` / `codex-*` 转发到 ChatGPT Codex 后端（沿用 `%USERPROFILE%\.codex\auth.json` 登录态）；`deepseek-v4-pro` / `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` 转发到 DeepSeek Responses API（凭据来自环境变量 `DEEPSEEK_API_KEY`）。
 - GPT 路由执行历史兼容清洗：第三方历史条目 id 规范化到官方类型前缀（`msg_`/`rs_`/`fc_`/`fco_`/`ctc_`/`ctco_`/`ws_`），`reasoning.content` 中的推理文本迁移到 `summary` 并清空 `content`。
-- DeepSeek Pro 将 Codex 的“中/高/极高”分别映射为官方 `low/high/max`；DeepSeek Flash 不显示档位选择并始终使用官方 `max`。两条 DeepSeek 路由都会删除 `service_tier` / `serviceTier`（DeepSeek 无服务档位概念）。
-- 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)）。Pro 暴露 `medium/high/xhigh` 三档，Flash 清空档位列表；路由器负责转换成 DeepSeek 官方档位。
+- DeepSeek Pro 将 Codex 的“中/高/极高”分别映射为官方 `low/high/max`；DeepSeek Flash 与 Flash-Vision 不显示档位选择并始终使用官方 `max`。三条 DeepSeek 路由都会删除 `service_tier` / `serviceTier`（DeepSeek 无服务档位概念）。
+- 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)）。Pro 暴露 `medium/high/xhigh` 三档，Flash 与 Flash-Vision 清空档位列表；路由器负责转换成 DeepSeek 官方档位。
 
 ## 前置条件
 
@@ -20,7 +20,7 @@
 - Codex 已通过 ChatGPT 登录（`codex login` 或桌面端登录），保证 `auth.json` 存在
 - 一个新的 DeepSeek API Key
 
-当前声明 DeepSeek 官方支持的 `deepseek-v4-pro` 与 `deepseek-v4-flash`。Pro 支持中/高/极高三档映射；Flash 不显示推理档位并固定使用官方 `max`。
+当前声明 DeepSeek 官方支持的 `deepseek-v4-pro`、`deepseek-v4-flash` 与实验性 `deepseek-v4-flash-vision-exp`。Pro 支持中/高/极高三档映射；Flash 与 Flash-Vision 不显示推理档位并固定使用官方 `max`，后者额外支持图片输入（`input_modalities` 含 `text` 与 `image`）。
 
 ## 关键文件
 
@@ -33,10 +33,12 @@
 | `config/deepseek-official-catalog.json` | DeepSeek 官方 Codex 模型条目（基准，勿手改字段语义） |
 | `scripts/build-model-catalog.mjs` | 合并本机 GPT 模型与 DeepSeek 条目，输出 `config/models.json` |
 | `scripts/Setup-Codex.ps1` | 自动备份并合并 Codex 配置 |
+| `scripts/Restore-CodexOfficial.ps1` | 原地恢复 Codex 官方 provider，并迁回历史会话标签 |
 | `scripts/migrate-sessions.mjs` | 迁移历史会话的 `model_provider` 标签 |
 | `scripts/Start-Router.ps1` / `Start-Background.ps1` / `Stop-Router.ps1` / `Test-Router.ps1` | 路由器启停与健康检查 |
 | `scripts/Enable-Autostart.ps1` / `enable-autostart.bat` | 注册当前用户登录后自动启动路由器 |
 | `start-router.bat` | 根目录入口：已运行则自动重启，未运行则后台启动 |
+| `restore-codex-official.bat` | 根目录入口：恢复官方 Codex 配置，不再经过本地路由 |
 
 ## 部署步骤
 
@@ -46,7 +48,7 @@
 node .\scripts\build-model-catalog.mjs
 ```
 
-读取 `%USERPROFILE%\.codex\models_cache.json`，保留当前 GPT 模型并加入 DeepSeek Pro/Flash，输出到 `config\models.json`。模型顺序固定为 Sol、Terra、Luna、Pro、Flash，其余模型随后按原优先级排列。该文件已被 Git 忽略，每台机器需自行生成；若 `models_cache.json` 不存在，先启动一次 Codex 再退出，然后重跑。
+读取 `%USERPROFILE%\.codex\models_cache.json`，保留当前 GPT 模型并加入 DeepSeek Pro/Flash/Flash-Vision，输出到 `config\models.json`。模型顺序固定为 Sol、Terra、Luna、Pro、Flash、Flash-Vision，其余模型随后按原优先级排列。该文件已被 Git 忽略，每台机器需自行生成；若 `models_cache.json` 不存在，先启动一次 Codex 再退出，然后重跑。
 
 ### 2. 保存 DeepSeek Key（明文）
 
@@ -175,6 +177,7 @@ node .\scripts\migrate-sessions.mjs
 --codex-home <路径>   指定 Codex 配置目录（默认 %USERPROFILE%\.codex）
 --from <标签>         源 provider 标签（默认 openai）
 --to <标签>           目标 provider 标签（默认 local_router）
+--backup-directory   指定备份目录（默认项目 backups 目录）
 --dry-run             只统计和列出，不修改
 ```
 
@@ -183,7 +186,7 @@ node .\scripts\migrate-sessions.mjs
 ### 6. 验证
 
 - 健康检查：`Test-Router.ps1`，或访问 http://127.0.0.1:4010/healthz
-- 模型列表前五项依次为 Sol、Terra、Luna、`DS-V4-Pro`、`DS-V4-Flash`；Pro 的中/高/极高对应官方 low/high/max，Flash 不提供档位选择且始终调用官方 max
+- 模型列表前六项依次为 Sol、Terra、Luna、`DS-V4-Pro`、`DS-V4-Flash`、`DS-V4-Flash-Vision`；Pro 的中/高/极高对应官方 low/high/max，Flash 与 Flash-Vision 不提供档位选择且始终调用官方 max
 - 发送消息后查看 `logs\router.out.log`（前台模式）：GPT 请求 `route=chatgpt`，DeepSeek 请求 `route=deepseek`，状态 200
 - 4010 端口被占用：更换端口后同步修改 `config\router.config.json` 与 Codex 配置中的 `base_url`
 
@@ -195,7 +198,24 @@ node .\scripts\migrate-sessions.mjs
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Stop-Router.ps1
 ```
 
-恢复官方配置：把 `backups\config.toml.<时间戳>.bak` 还原到 `%USERPROFILE%\.codex\config.toml`，重启 Codex。`auth.json` 未被修改，无需重新登录。
+恢复官方配置前先完全退出 Codex 桌面端与 CLI，然后双击根目录的 `restore-codex-official.bat`。脚本会：
+
+- 备份当前 `config.toml`，将 `model_provider` 改回官方默认的 `openai`
+- 删除本项目写入的 `model`、`model_catalog_json` 与 `[model_providers.local_router]`
+- 保留 MCP、插件、权限及其他无关配置
+- 将历史会话标签从 `local_router` 迁回 `openai`，并复用会话迁移脚本的备份机制
+
+等价 PowerShell 命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Restore-CodexOfficial.ps1
+```
+
+可先加 `-DryRun` 预览；只有明确不需要迁回历史会话时才使用 `-SkipSessionMigration`。脚本不修改 `auth.json`、DeepSeek Key、路由进程或 Windows 登录自启动项。完成后重新打开 Codex；若不再需要后台路由，另行停止或关闭其登录自启动。
+
+由 DeepSeek 生成的旧会话会重新出现在官方历史列表中，但其第三方历史条目未经路由兼容清洗，直接用官方 GPT 续聊仍可能失败；这种会话应保留作查看，并新建官方会话继续工作。
+
+官方配置依据：[OpenAI Docs：Codex Configuration Reference](https://developers.openai.com/codex/config-reference)。用户级配置位于 `~/.codex/config.toml`，内置 provider 的默认值为 `openai`。
 
 ## 安全边界
 
@@ -211,4 +231,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Stop-Router.ps1
 npm test
 ```
 
-共 7 项测试：凭据隔离、Pro 档位映射与 Flash 强制 max、service tier 剥离、推理清洗、id 规范化、未知模型拒绝、凭据缺失 fail closed。测试使用本地模拟上游，不访问真实 API。
+测试覆盖凭据隔离、档位映射、缓存与历史兼容清洗、未知模型拒绝、凭据缺失 fail closed，以及官方配置恢复。测试使用本地模拟与临时配置，不访问真实 API。

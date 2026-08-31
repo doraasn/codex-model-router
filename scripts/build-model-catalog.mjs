@@ -20,7 +20,7 @@ if (!Array.isArray(catalog.models) || catalog.models.length === 0) {
 
 const officialDeepSeekPath = fileURLToPath(new URL("../config/deepseek-official-catalog.json", import.meta.url));
 const officialDeepSeekCatalog = JSON.parse(await readFile(officialDeepSeekPath, "utf8"));
-const deepSeekSlugs = ["deepseek-v4-pro", "deepseek-v4-flash"];
+const deepSeekSlugs = ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"];
 const officialDeepSeekModels = deepSeekSlugs.map((slug) => {
   const model = (officialDeepSeekCatalog.models || []).find((candidate) => candidate.slug === slug);
   if (!model) throw new Error(`DeepSeek official catalog is missing ${slug}`);
@@ -45,11 +45,12 @@ function normalizeModel(model) {
 
 // 以 DeepSeek 官方目录为基准（完整 GPT-5 harness、freeform apply_patch、
 // 官方上下文窗口等），覆盖显示名与 Codex 档位：Pro 暴露中/高/极高，路由器
-// 分别映射为官方 low/high/max；Flash 不暴露档位并始终使用官方 max。
+// 分别映射为官方 low/high/max；Flash 与 Flash-Vision 不暴露档位并始终使用官方 max。
 const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
   const model = structuredClone(officialModel);
   const isPro = officialModel.slug === "deepseek-v4-pro";
-  model.display_name = isPro ? "DS-V4-Pro" : "DS-V4-Flash";
+  const isVision = officialModel.slug === "deepseek-v4-flash-vision-exp";
+  model.display_name = isPro ? "DS-V4-Pro" : isVision ? "DS-V4-Flash-Vision" : "DS-V4-Flash";
   model.supported_reasoning_levels = isPro
     ? [
         { effort: "medium", description: "Maps to DeepSeek low" },
@@ -66,6 +67,7 @@ const preferredOrder = new Map([
   ["gpt-5.6-luna", 2],
   ["deepseek-v4-pro", 3],
   ["deepseek-v4-flash", 4],
+  ["deepseek-v4-flash-vision-exp", 5],
 ]);
 
 const models = catalog.models

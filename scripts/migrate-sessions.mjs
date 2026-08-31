@@ -33,6 +33,7 @@ if (!userProfile) {
 const codexHome = resolve(argument("--codex-home", `${userProfile}/.codex`));
 const fromLabel = argument("--from", "openai");
 const toLabel = argument("--to", "local_router");
+const backupsDirectory = resolve(argument("--backup-directory", join(projectDirectory, "backups")));
 const dryRun = process.argv.includes("--dry-run");
 const force = process.argv.includes("--force");
 
@@ -151,7 +152,7 @@ async function main() {
 
   // 1. 备份：JSONL 全部复制 + SQLite 一致性快照 + meta.json
   const stamp = timestampForDirectory();
-  const backupRoot = join(projectDirectory, "backups", `session-provider-migration-${stamp}`);
+  const backupRoot = join(backupsDirectory, `session-provider-migration-${stamp}`);
   const backupJsonlRoot = join(backupRoot, "jsonl");
   const backupStatePath = join(backupRoot, "state", "state_5.sqlite");
   await mkdir(join(backupRoot, "state"), { recursive: true });
