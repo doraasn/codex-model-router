@@ -91,7 +91,7 @@ test("routes GPT and DeepSeek without crossing credentials", async (t) => {
   }
 });
 
-test("maps Pro efforts, forces Flash max, and leaves GPT effort unchanged", async (t) => {
+test("maps DeepSeek efforts and leaves GPT effort unchanged", async (t) => {
   const chatGptReceived = [];
   const deepSeekReceived = [];
   const chatGptServer = mockUpstream(chatGptReceived);
@@ -137,12 +137,13 @@ test("maps Pro efforts, forces Flash max, and leaves GPT effort unchanged", asyn
     { payload: { model: "deepseek-v4-pro", input: "pro high", reasoning: { effort: "high" } }, expected: "high" },
     { payload: { model: "deepseek-v4-pro", input: "pro xhigh", reasoning: { effort: "xhigh" } }, expected: "max" },
     { payload: { model: "deepseek-v4-pro", input: "pro missing effort" }, expected: "high" },
-    { payload: { model: "deepseek-v4-flash", input: "flash missing effort" }, expected: "max" },
-    { payload: { model: "deepseek-v4-flash", input: "flash low", reasoning: { effort: "low" } }, expected: "max" },
-    { payload: { model: "deepseek-v4-flash", input: "flash high", reasoning: { effort: "high" } }, expected: "max" },
-    { payload: { model: "deepseek-v4-flash", input: "flash legacy", reasoning_effort: "low" }, expected: "max", legacy: "max" },
-    { payload: { model: "deepseek-v4-flash-vision-exp", input: "vision high", reasoning: { effort: "high" } }, expected: "max" },
-    { payload: { model: "deepseek-v4-flash-vision-exp", input: "vision legacy", reasoning_effort: "low" }, expected: "max", legacy: "max" },
+    { payload: { model: "deepseek-v4-flash", input: "flash missing effort" }, expected: "high" },
+    { payload: { model: "deepseek-v4-flash", input: "flash medium", reasoning: { effort: "medium" } }, expected: "low" },
+    { payload: { model: "deepseek-v4-flash", input: "flash high", reasoning: { effort: "high" } }, expected: "high" },
+    { payload: { model: "deepseek-v4-flash", input: "flash xhigh", reasoning: { effort: "xhigh" } }, expected: "max" },
+    { payload: { model: "deepseek-v4-flash", input: "flash legacy", reasoning_effort: "medium" }, expected: "low", legacy: "low" },
+    { payload: { model: "deepseek-v4-flash-vision-exp", input: "vision high", reasoning: { effort: "high" } }, expected: "high" },
+    { payload: { model: "deepseek-v4-flash-vision-exp", input: "vision legacy", reasoning_effort: "xhigh" }, expected: "max", legacy: "max" },
   ];
   for (const { payload } of deepSeekPayloads) {
     const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {

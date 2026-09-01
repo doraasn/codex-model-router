@@ -43,21 +43,34 @@ function normalizeModel(model) {
   };
 }
 
+const codexReasoningLevelsByDeepSeekEffort = new Map([
+  ["low", { effort: "medium", description: "Maps to DeepSeek low" }],
+  ["high", { effort: "high", description: "Maps to DeepSeek high" }],
+  ["max", { effort: "xhigh", description: "Maps to DeepSeek max" }],
+]);
+const codexDefaultReasoningByDeepSeekEffort = new Map([
+  ["low", "medium"],
+  ["high", "high"],
+  ["max", "xhigh"],
+]);
+
 // 以 DeepSeek 官方目录为基准（完整 GPT-5 harness、freeform apply_patch、
-// 官方上下文窗口等），覆盖显示名与 Codex 档位：Pro 暴露中/高/极高，路由器
-// 分别映射为官方 low/high/max；Flash 与 Flash-Vision 不暴露档位并始终使用官方 max。
+// 官方上下文窗口等），覆盖显示名与 Codex 档位。只映射官方目录已声明的
+// low/high/max 档位，不为单个模型补充官方未声明的档位。
 const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
   const model = structuredClone(officialModel);
-  const isPro = officialModel.slug === "deepseek-v4-pro";
   const isVision = officialModel.slug === "deepseek-v4-flash-vision-exp";
-  model.display_name = isPro ? "DS V4 Pro" : isVision ? "DS V4 Flash VS exp" : "DS V4 Flash";
-  model.supported_reasoning_levels = isPro
-    ? [
-        { effort: "medium", description: "Maps to DeepSeek low" },
-        { effort: "high", description: "Maps to DeepSeek high" },
-        { effort: "xhigh", description: "Maps to DeepSeek max" },
-      ]
-    : [];
+  model.display_name = officialModel.slug === "deepseek-v4-pro"
+    ? "DS V4 Pro"
+    : isVision
+      ? "DS V4 Flash VS exp"
+      : "DS V4 Flash";
+  model.default_reasoning_level =
+    codexDefaultReasoningByDeepSeekEffort.get(model.default_reasoning_level)
+    || model.default_reasoning_level;
+  model.supported_reasoning_levels = (model.supported_reasoning_levels || [])
+    .map((level) => codexReasoningLevelsByDeepSeekEffort.get(level.effort))
+    .filter(Boolean);
   return model;
 });
 

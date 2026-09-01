@@ -11,8 +11,8 @@
 - 路由器仅监听 `127.0.0.1:4010`，只接受 `POST /v1/responses`、`POST /responses` 与 `GET /healthz`。
 - 按请求体 `model` 字段路由：`gpt-*` / `codex-*` 转发到 ChatGPT Codex 后端（沿用 `%USERPROFILE%\.codex\auth.json` 登录态）；`deepseek-v4-pro` / `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` 转发到 DeepSeek Responses API（凭据来自环境变量 `DEEPSEEK_API_KEY`）。
 - GPT 路由执行历史兼容清洗：第三方历史条目 id 规范化到官方类型前缀（`msg_`/`rs_`/`fc_`/`fco_`/`ctc_`/`ctco_`/`ws_`），`reasoning.content` 中的推理文本迁移到 `summary` 并清空 `content`。
-- DeepSeek Pro 将 Codex 的“中/高/极高”分别映射为官方 `low/high/max`；DeepSeek Flash 与 Flash VS exp 不显示档位选择并始终使用官方 `max`。三条 DeepSeek 路由都会删除 `service_tier` / `serviceTier`（DeepSeek 无服务档位概念）。
-- 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)）。Pro 暴露 `medium/high/xhigh` 三档，Flash 与 Flash VS exp 清空档位列表；路由器负责转换成 DeepSeek 官方档位。
+- 三条 DeepSeek 模型统一将 Codex 的“中/高/极高”分别映射为官方 `low/high/max`；路由都会删除 `service_tier` / `serviceTier`（DeepSeek 无服务档位概念）。
+- 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)）。仅转换官方已声明的 `low/high/max` 档位，不为单个模型补充缺失档位。
 
 ## 前置条件
 
@@ -20,7 +20,7 @@
 - Codex 已通过 ChatGPT 登录（`codex login` 或桌面端登录），保证 `auth.json` 存在
 - 一个新的 DeepSeek API Key
 
-当前声明 DeepSeek 官方支持的 `deepseek-v4-pro`、`deepseek-v4-flash` 与实验性 `deepseek-v4-flash-vision-exp`。Pro 支持中/高/极高三档映射；Flash 与 Flash VS exp 不显示推理档位并固定使用官方 `max`，后者额外支持图片输入（`input_modalities` 含 `text` 与 `image`）。
+当前声明 DeepSeek 官方支持的 `deepseek-v4-pro`、`deepseek-v4-flash` 与实验性 `deepseek-v4-flash-vision-exp`。三条模型按官方目录声明的推理档位生成列表；后者额外支持图片输入（`input_modalities` 含 `text` 与 `image`）。
 
 ## 关键文件
 
@@ -186,7 +186,7 @@ node .\scripts\migrate-sessions.mjs
 ### 6. 验证
 
 - 健康检查：`Test-Router.ps1`，或访问 http://127.0.0.1:4010/healthz
-- 模型列表前六项依次为 Sol、Terra、Luna、`DS V4 Pro`、`DS V4 Flash`、`DS V4 Flash VS exp`；Pro 的中/高/极高对应官方 low/high/max，Flash 与 Flash VS exp 不提供档位选择且始终调用官方 max
+- 模型列表前六项依次为 Sol、Terra、Luna、`DS V4 Pro`、`DS V4 Flash`、`DS V4 Flash VS exp`；DeepSeek 的中/高/极高对应官方 low/high/max
 - 发送消息后查看 `logs\router.out.log`（前台模式）：GPT 请求 `route=chatgpt`，DeepSeek 请求 `route=deepseek`，状态 200
 - 4010 端口被占用：更换端口后同步修改 `config\router.config.json` 与 Codex 配置中的 `base_url`
 

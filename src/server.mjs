@@ -119,7 +119,7 @@ function sanitizeChatGptPayload(payload) {
   return changed;
 }
 
-const PRO_REASONING_EFFORT_MAP = new Map([
+const DEEPSEEK_REASONING_EFFORT_MAP = new Map([
   ["low", "low"],
   ["medium", "low"],
   ["high", "high"],
@@ -127,16 +127,13 @@ const PRO_REASONING_EFFORT_MAP = new Map([
   ["max", "max"],
 ]);
 
-// Pro 将 Codex 的中/高/极高映射为官方 low/high/max；缺省或未知档位回退 high。
-// Flash 不暴露档位选择，并在转发前无条件使用官方 max。GPT 不经过此函数。
+// DeepSeek 模型将 Codex 的中/高/极高统一映射为官方 low/high/max；
+// 缺省或未知档位回退 high。GPT 不经过此函数。
 function normalizeDeepSeekPayload(payload) {
   let changed = false;
-  const isPro = payload.model === "deepseek-v4-pro";
-  const mapEffort = (effort) => isPro
-    ? (PRO_REASONING_EFFORT_MAP.get(effort) || "high")
-    : "max";
+  const mapEffort = (effort) => DEEPSEEK_REASONING_EFFORT_MAP.get(effort) || "high";
   if (!payload.reasoning || typeof payload.reasoning !== "object" || Array.isArray(payload.reasoning)) {
-    payload.reasoning = { effort: mapEffort(undefined) };
+    payload.reasoning = { effort: mapEffort(payload.reasoning_effort) };
     changed = true;
   } else {
     const mappedEffort = mapEffort(payload.reasoning.effort);
