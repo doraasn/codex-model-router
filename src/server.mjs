@@ -161,6 +161,48 @@ function normalizeDeepSeekPayload(payload) {
   return changed;
 }
 
+// DeepSeek 后端对 input 条目强校验 call_id：function_call、custom_tool_call、
+// function_call_output、custom_tool_call_output 都要求 call_id。Codex 的委派工具
+// send_message_to_thread 结果以 function_call_output 记录时只带 id（fco_...）
+// 而不带 call_id，回放到 DeepSeek 会触发
+// "Failed to deserialize ... input: missing field `call_id`"。
+// 此处按名称把缺失的 call_id 回填为前序同名调用的 call_id，找不到再从条目 id 派生。
+function sanitizeDeepSeekCallIds(payload) {
+  if (!payload || !Array.isArray(payload.input)) return false;
+  let changed = false;
+  const callTypes = new Set(["function_call", "custom_tool_call"]);
+  const outputTypes = new Set(["function_call_output", "custom_tool_call_output"]);
+  const lastCallIdByName = new Map();
+  for (const item of payload.input) {
+    if (!item || typeof item !== "object") continue;
+    if (callTypes.has(item.type)) {
+      if (typeof item.call_id === "string" && item.call_id) {
+        const key = typeof item.name === "string" ? item.name : item.call_id;
+        lastCallIdByName.set(key, item.call_id);
+      } else if (typeof item.id === "string") {
+        item.call_id = item.id;
+        const key = typeof item.name === "string" ? item.name : item.call_id;
+        lastCallIdByName.set(key, item.call_id);
+        changed = true;
+      }
+      continue;
+    }
+    if (!outputTypes.has(item.type)) continue;
+    if (typeof item.call_id === "string" && item.call_id) continue;
+    const key = typeof item.name === "string" ? item.name : "";
+    const pairedCallId = key ? lastCallIdByName.get(key) : undefined;
+    if (typeof pairedCallId === "string" && pairedCallId) {
+      item.call_id = pairedCallId;
+    } else if (typeof item.id === "string") {
+      item.call_id = item.id;
+    } else {
+      item.call_id = "call_" + Date.now().toString(36);
+    }
+    changed = true;
+  }
+  return changed;
+}
+
 function buildChatGptHeaders(incomingHeaders) {
   const headers = new Headers();
   for (const [name, rawValue] of Object.entries(incomingHeaders)) {
@@ -255,8 +297,13 @@ export async function createRouterServer(overrides = {}) {
       let requestBody = body;
       if (route === "chatgpt" && sanitizeChatGptPayload(payload)) {
         requestBody = Buffer.from(JSON.stringify(payload), "utf8");
-      } else if (route === "deepseek" && normalizeDeepSeekPayload(payload)) {
-        requestBody = Buffer.from(JSON.stringify(payload), "utf8");
+      } else if (route === "deepseek") {
+        // 两个清洗都要执行，不能用 || 短路：第 2 个可能在上一个已改写时仍需跑
+        const normalized = normalizeDeepSeekPayload(payload);
+        const sanitizedCallIds = sanitizeDeepSeekCallIds(payload);
+        if (normalized || sanitizedCallIds) {
+          requestBody = Buffer.from(JSON.stringify(payload), "utf8");
+        }
       }
 
       const deepSeekKey = process.env.DEEPSEEK_API_KEY || "";

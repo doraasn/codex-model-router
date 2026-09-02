@@ -553,3 +553,76 @@ test("fails closed when route credentials are missing", async (t) => {
   assert.equal(deepSeekResponse.status, 503);
   assert.equal((await deepSeekResponse.json()).error, "deepseek_key_not_configured");
 });
+
+test("backfills missing call_id on DeepSeek input items only", async (t) => {
+  const chatGptReceived = [];
+  const deepSeekReceived = [];
+  const chatGptServer = mockUpstream(chatGptReceived);
+  const deepSeekServer = mockUpstream(deepSeekReceived);
+  const chatGptPort = await listen(chatGptServer);
+  const deepSeekPort = await listen(deepSeekServer);
+  t.after(() => chatGptServer.close());
+  t.after(() => deepSeekServer.close());
+
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  t.after(() => delete process.env.DEEPSEEK_API_KEY);
+
+  const router = await createRouterServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      maxBodyBytes: 1024 * 1024,
+      requestTimeoutMs: 5000,
+      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
+      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
+      deepseekModels: DEEPSEEK_MODELS,
+      gptModelPrefixes: ["gpt-", "codex-"],
+    },
+  });
+  const routerPort = await listen(router);
+  t.after(() => router.close());
+
+  const headers = {
+    authorization: "Bearer chatgpt-test-token",
+    "content-type": "application/json",
+  };
+  // Codex 委派工具 send_message_to_thread 的 function_call 带 call_id，
+  // 但其 function_call_output 只带 id（fco_...）、缺 call_id，DeepSeek 会拒绝。
+  const input = [
+    { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+    { type: "function_call", id: "call-item-1", name: "send_message_to_thread", call_id: "call_00_ABC", arguments: "{}" },
+    { type: "function_call_output", id: "fco_01a06170", name: "send_message_to_thread", output: "{\"ok\":true}" },
+    { type: "custom_tool_call", id: "ctc-item-1", name: "apply_patch", call_id: "call_00_DEF", input: "patch" },
+    { type: "custom_tool_call_output", id: "ctco_01a06171", name: "apply_patch", output: "ok" },
+    { type: "function_call_output", id: "fco_orphan", output: "some result" },
+  ];
+
+  const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "deepseek-v4-pro", input }),
+  });
+  assert.equal(deepSeekResponse.status, 200);
+  await deepSeekResponse.text();
+
+  const gptResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "gpt-5.6-sol", input }),
+  });
+  assert.equal(gptResponse.status, 200);
+  await gptResponse.text();
+
+  const dsInput = deepSeekReceived[0].body.input;
+  // function_call_output 按名称配对到前序 function_call 的 call_id
+  assert.equal(dsInput[2].call_id, "call_00_ABC");
+  // 自身已带 call_id 的条目保持不变
+  assert.equal(dsInput[3].call_id, "call_00_DEF");
+  assert.equal(dsInput[4].call_id, "call_00_DEF");
+  // 无名称、无配对调用时，从条目 id 派生
+  assert.equal(dsInput[5].call_id, "fco_orphan");
+
+  // GPT 路由不补齐 call_id（OpenAI 原生格式不需要，ChatGpt 清洗只处理 id 前缀/推理）
+  const gptInput = chatGptReceived[0].body.input;
+  assert.equal(gptInput[2].call_id, undefined);
+});
