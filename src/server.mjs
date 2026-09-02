@@ -166,40 +166,64 @@ function normalizeDeepSeekPayload(payload) {
 // send_message_to_thread 结果以 function_call_output 记录时只带 id（fco_...）
 // 而不带 call_id，回放到 DeepSeek 会触发
 // "Failed to deserialize ... input: missing field `call_id`"。
-// 此处按名称把缺失的 call_id 回填为前序同名调用的 call_id，找不到再从条目 id 派生。
+// 处理规则：
+//  1. 缺失/为空 call_id 的输出条目，优先配对到「尚未有输出」的同名调用（按出现顺序取最早一条），
+//     保证 call_id 不与其他输出重复，也不产生 "Duplicate tool output"。
+//  2. 若不存在可配对的未调用，则该输出是真正的孤儿（其调用不在历史里），DeepSeek 无法接受，
+//     直接从 input 中移除，避免既缺 call_id 又造成重复。
+//  3. 缺失 call_id 的调用条目，从条目 id 派生兜底。
 function sanitizeDeepSeekCallIds(payload) {
   if (!payload || !Array.isArray(payload.input)) return false;
   let changed = false;
   const callTypes = new Set(["function_call", "custom_tool_call"]);
   const outputTypes = new Set(["function_call_output", "custom_tool_call_output"]);
-  const lastCallIdByName = new Map();
+
+  const outputCallIds = new Set();
   for (const item of payload.input) {
-    if (!item || typeof item !== "object") continue;
-    if (callTypes.has(item.type)) {
-      if (typeof item.call_id === "string" && item.call_id) {
-        const key = typeof item.name === "string" ? item.name : item.call_id;
-        lastCallIdByName.set(key, item.call_id);
-      } else if (typeof item.id === "string") {
+    if (item && typeof item === "object" && outputTypes.has(item.type) && typeof item.call_id === "string" && item.call_id) {
+      outputCallIds.add(item.call_id);
+    }
+  }
+
+  // 收集「还没有输出」的同名调用 id，按出现顺序排队
+  const unpairedCallsByName = new Map();
+  for (const item of payload.input) {
+    if (!item || typeof item !== "object" || !callTypes.has(item.type)) continue;
+    if (typeof item.call_id !== "string" || !item.call_id) {
+      if (typeof item.id === "string") {
         item.call_id = item.id;
-        const key = typeof item.name === "string" ? item.name : item.call_id;
-        lastCallIdByName.set(key, item.call_id);
         changed = true;
       }
+    }
+    if (typeof item.call_id === "string" && item.call_id && !outputCallIds.has(item.call_id)) {
+      const key = typeof item.name === "string" ? item.name : "";
+      if (!unpairedCallsByName.has(key)) unpairedCallsByName.set(key, []);
+      unpairedCallsByName.get(key).push(item.call_id);
+    }
+  }
+
+  const newInput = [];
+  for (const item of payload.input) {
+    if (!item || typeof item !== "object" || !outputTypes.has(item.type)) {
+      newInput.push(item);
       continue;
     }
-    if (!outputTypes.has(item.type)) continue;
-    if (typeof item.call_id === "string" && item.call_id) continue;
-    const key = typeof item.name === "string" ? item.name : "";
-    const pairedCallId = key ? lastCallIdByName.get(key) : undefined;
-    if (typeof pairedCallId === "string" && pairedCallId) {
-      item.call_id = pairedCallId;
-    } else if (typeof item.id === "string") {
-      item.call_id = item.id;
-    } else {
-      item.call_id = "call_" + Date.now().toString(36);
+    if (typeof item.call_id === "string" && item.call_id) {
+      newInput.push(item);
+      continue;
     }
-    changed = true;
+    const key = typeof item.name === "string" ? item.name : "";
+    const pool = key ? unpairedCallsByName.get(key) : undefined;
+    if (pool && pool.length > 0) {
+      item.call_id = pool.shift();
+      changed = true;
+      newInput.push(item);
+    } else {
+      // 无可配对调用，丢弃孤儿输出
+      changed = true;
+    }
   }
+  payload.input = newInput;
   return changed;
 }
 

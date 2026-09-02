@@ -586,43 +586,61 @@ test("backfills missing call_id on DeepSeek input items only", async (t) => {
     authorization: "Bearer chatgpt-test-token",
     "content-type": "application/json",
   };
-  // Codex 委派工具 send_message_to_thread 的 function_call 带 call_id，
-  // 但其 function_call_output 只带 id（fco_...）、缺 call_id，DeepSeek 会拒绝。
-  const input = [
+  // 场景1：存在未配对调用 -> 缺失 call_id 的输出按 name 回填
+  const backfillInput = [
     { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
     { type: "function_call", id: "call-item-1", name: "send_message_to_thread", call_id: "call_00_ABC", arguments: "{}" },
     { type: "function_call_output", id: "fco_01a06170", name: "send_message_to_thread", output: "{\"ok\":true}" },
-    { type: "custom_tool_call", id: "ctc-item-1", name: "apply_patch", call_id: "call_00_DEF", input: "patch" },
-    { type: "custom_tool_call_output", id: "ctco_01a06171", name: "apply_patch", output: "ok" },
-    { type: "function_call_output", id: "fco_orphan", output: "some result" },
   ];
 
-  const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ model: "deepseek-v4-pro", input }),
-  });
-  assert.equal(deepSeekResponse.status, 200);
-  await deepSeekResponse.text();
+  // 场景2（真实病根）：两次 send_message_to_thread 调用各自已有输出，
+  // 再加一条无 call_id、且找不到可配对调用的孤儿输出 -> 应被丢弃，避免重复。
+  const orphanInput = [
+    { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+    { type: "function_call", id: "call-item-1", name: "send_message_to_thread", call_id: "call_00_ABC", arguments: "{}" },
+    { type: "function_call_output", id: "fco_01a0616c-1", call_id: "call_00_ABC", output: "{\"ok\":true}" },
+    { type: "function_call", id: "call-item-2", name: "send_message_to_thread", call_id: "call_00_DEF", arguments: "{}" },
+    { type: "function_call_output", id: "fco_01a0616c-2", call_id: "call_00_DEF", output: "{\"ok\":true}" },
+    { type: "function_call_output", id: "fco_orphan", name: "send_message_to_thread", output: "<codex_delegation>" },
+  ];
 
+  let i = 0;
+  for (const input of [backfillInput, orphanInput]) {
+    const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: "deepseek-v4-pro", input }),
+    });
+    assert.equal(deepSeekResponse.status, 200);
+    await deepSeekResponse.text();
+    if (i === 0) {
+      const dsInput = deepSeekReceived[0].body.input;
+      // 缺失 call_id 的输出按 name 回填到未配对调用
+      assert.equal(dsInput[2].call_id, "call_00_ABC");
+    } else {
+      const dsInput = deepSeekReceived[1].body.input;
+      // 孤儿输出被移除，input 长度 5
+      assert.equal(dsInput.length, 5);
+      // 原有 call_id 保持不变
+      assert.equal(dsInput[2].call_id, "call_00_ABC");
+      assert.equal(dsInput[4].call_id, "call_00_DEF");
+      // 输出 call_id 之间无重复
+      const outputIds = dsInput.filter((x) => x.type === "function_call_output").map((x) => x.call_id);
+      assert.equal(new Set(outputIds).size, outputIds.length);
+      assert.ok(!dsInput.some((x) => x.type === "function_call_output" && x.id === "fco_orphan"));
+    }
+    i += 1;
+  }
+
+  // GPT 路由不补齐 call_id、不丢弃条目（OpenAI 原生格式不需要，ChatGpt 清洗只处理 id 前缀/推理）
   const gptResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: "gpt-5.6-sol", input }),
+    body: JSON.stringify({ model: "gpt-5.6-sol", input: orphanInput }),
   });
   assert.equal(gptResponse.status, 200);
   await gptResponse.text();
-
-  const dsInput = deepSeekReceived[0].body.input;
-  // function_call_output 按名称配对到前序 function_call 的 call_id
-  assert.equal(dsInput[2].call_id, "call_00_ABC");
-  // 自身已带 call_id 的条目保持不变
-  assert.equal(dsInput[3].call_id, "call_00_DEF");
-  assert.equal(dsInput[4].call_id, "call_00_DEF");
-  // 无名称、无配对调用时，从条目 id 派生
-  assert.equal(dsInput[5].call_id, "fco_orphan");
-
-  // GPT 路由不补齐 call_id（OpenAI 原生格式不需要，ChatGpt 清洗只处理 id 前缀/推理）
   const gptInput = chatGptReceived[0].body.input;
-  assert.equal(gptInput[2].call_id, undefined);
+  assert.equal(gptInput.length, orphanInput.length);
+  assert.equal(gptInput[5].call_id, undefined);
 });
