@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const restoreScript = join(projectDirectory, "scripts", "Restore-CodexOfficial.ps1");
+const manageScript = join(projectDirectory, "manage-router.ps1");
 const tempDirectory = join(projectDirectory, "temp");
 
 async function fixture() {
@@ -50,7 +50,8 @@ function restore(
   const argumentsList = [
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
-    "-File", restoreScript,
+    "-File", manageScript,
+    "-Action", "restore-official",
     "-CodexHome", codexHome,
     "-ConfigPath", configPath,
     "-BackupDirectory", backupDirectory,

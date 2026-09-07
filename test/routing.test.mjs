@@ -10,6 +10,33 @@ const DEEPSEEK_MODELS = new Set([
   "deepseek-v4-flash-vision-exp",
 ]);
 
+// 与 config/router.config.json 同构的 provider 化配置，端口指向本地模拟上游。
+function routerConfig({ chatgptPort, deepseekPort, maxBodyBytes = 1024 * 1024, requestTimeoutMs = 5000 }) {
+  return {
+    host: "127.0.0.1",
+    port: 0,
+    maxBodyBytes,
+    requestTimeoutMs,
+    providers: [
+      {
+        id: "chatgpt",
+        baseUrl: `http://127.0.0.1:${chatgptPort}/codex/`,
+        auth: { type: "chatgpt" },
+        match: { models: new Set(), prefixes: ["gpt-", "codex-"] },
+        transforms: ["chatgpt-history"],
+        retryOnPromptCacheError: true,
+      },
+      {
+        id: "deepseek",
+        baseUrl: `http://127.0.0.1:${deepseekPort}/`,
+        auth: { type: "env", envVar: "DEEPSEEK_API_KEY" },
+        match: { models: new Set([...DEEPSEEK_MODELS]), prefixes: [] },
+        transforms: ["deepseek-effort", "deepseek-call-ids"],
+      },
+    ],
+  };
+}
+
 function listen(server) {
   server.listen(0, "127.0.0.1");
   return once(server, "listening").then(() => server.address().port);
@@ -45,16 +72,7 @@ test("routes GPT and DeepSeek without crossing credentials", async (t) => {
   t.after(() => delete process.env.DEEPSEEK_API_KEY);
 
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024 * 1024,
-      requestTimeoutMs: 5000,
-      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
-      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
   });
   const routerPort = await listen(router);
   t.after(() => router.close());
@@ -105,16 +123,7 @@ test("maps DeepSeek efforts and leaves GPT effort unchanged", async (t) => {
   t.after(() => delete process.env.DEEPSEEK_API_KEY);
 
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024 * 1024,
-      requestTimeoutMs: 5000,
-      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
-      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
   });
   const routerPort = await listen(router);
   t.after(() => router.close());
@@ -179,16 +188,7 @@ test("strips service tier only on the DeepSeek route", async (t) => {
   t.after(() => delete process.env.DEEPSEEK_API_KEY);
 
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024 * 1024,
-      requestTimeoutMs: 5000,
-      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
-      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
   });
   const routerPort = await listen(router);
   t.after(() => router.close());
@@ -233,16 +233,7 @@ test("removes legacy prompt cache retention fields and headers only on the ChatG
   t.after(() => delete process.env.DEEPSEEK_API_KEY);
 
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024 * 1024,
-      requestTimeoutMs: 5000,
-      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
-      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
   });
   const routerPort = await listen(router);
   t.after(() => router.close());
@@ -307,16 +298,7 @@ test("retries a ChatGPT cache retention error once without prompt_cache_key", as
   t.after(() => chatGptServer.close());
 
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024 * 1024,
-      requestTimeoutMs: 5000,
-      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
-      deepseekBaseUrl: "http://127.0.0.1:9/",
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: 9 }),
   });
   const routerPort = await listen(router);
   t.after(() => router.close());
@@ -350,16 +332,7 @@ test("sanitizes DeepSeek reasoning content only on the ChatGPT route", async (t)
   t.after(() => delete process.env.DEEPSEEK_API_KEY);
 
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024 * 1024,
-      requestTimeoutMs: 5000,
-      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
-      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
   });
   const routerPort = await listen(router);
   t.after(() => router.close());
@@ -423,16 +396,7 @@ test("normalizes third-party item ids on the ChatGPT route and keeps call_id pai
   t.after(() => delete process.env.DEEPSEEK_API_KEY);
 
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024 * 1024,
-      requestTimeoutMs: 5000,
-      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
-      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
   });
   const routerPort = await listen(router);
   t.after(() => router.close());
@@ -495,16 +459,7 @@ test("normalizes third-party item ids on the ChatGPT route and keeps call_id pai
 
 test("rejects unsupported models", async (t) => {
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024,
-      requestTimeoutMs: 1000,
-      chatgptBaseUrl: "http://127.0.0.1:9/codex/",
-      deepseekBaseUrl: "http://127.0.0.1:9/",
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: 9, deepseekPort: 9, maxBodyBytes: 1024, requestTimeoutMs: 1000 }),
   });
   const port = await listen(router);
   t.after(() => router.close());
@@ -520,16 +475,7 @@ test("rejects unsupported models", async (t) => {
 test("fails closed when route credentials are missing", async (t) => {
   delete process.env.DEEPSEEK_API_KEY;
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024,
-      requestTimeoutMs: 1000,
-      chatgptBaseUrl: "http://127.0.0.1:9/codex/",
-      deepseekBaseUrl: "http://127.0.0.1:9/",
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: 9, deepseekPort: 9, maxBodyBytes: 1024, requestTimeoutMs: 1000 }),
   });
   const port = await listen(router);
   t.after(() => router.close());
@@ -568,16 +514,7 @@ test("backfills missing call_id on DeepSeek input items only", async (t) => {
   t.after(() => delete process.env.DEEPSEEK_API_KEY);
 
   const router = await createRouterServer({
-    config: {
-      host: "127.0.0.1",
-      port: 0,
-      maxBodyBytes: 1024 * 1024,
-      requestTimeoutMs: 5000,
-      chatgptBaseUrl: `http://127.0.0.1:${chatGptPort}/codex/`,
-      deepseekBaseUrl: `http://127.0.0.1:${deepSeekPort}/`,
-      deepseekModels: DEEPSEEK_MODELS,
-      gptModelPrefixes: ["gpt-", "codex-"],
-    },
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
   });
   const routerPort = await listen(router);
   t.after(() => router.close());
@@ -643,4 +580,53 @@ test("backfills missing call_id on DeepSeek input items only", async (t) => {
   const gptInput = chatGptReceived[0].body.input;
   assert.equal(gptInput.length, orphanInput.length);
   assert.equal(gptInput[5].call_id, undefined);
+});
+
+test("supports additional providers declared in config without code changes", async (t) => {
+  const zaiReceived = [];
+  const zaiServer = mockUpstream(zaiReceived);
+  const zaiPort = await listen(zaiServer);
+  t.after(() => zaiServer.close());
+
+  process.env.GLM_API_KEY = "glm-test-key";
+  t.after(() => delete process.env.GLM_API_KEY);
+
+  const router = await createRouterServer({
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      maxBodyBytes: 1024 * 1024,
+      requestTimeoutMs: 5000,
+      providers: [
+        {
+          id: "zai",
+          name: "Z.ai GLM",
+          baseUrl: `http://127.0.0.1:${zaiPort}/`,
+          auth: { type: "env", envVar: "GLM_API_KEY" },
+          match: { prefixes: ["glm-"] },
+          transforms: [],
+        },
+      ],
+    },
+  });
+  const routerPort = await listen(router);
+  t.after(() => router.close());
+
+  const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer chatgpt-test-token",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ model: "glm-4.7", input: "hello", service_tier: "priority" }),
+  });
+  assert.equal(response.status, 200);
+  await response.text();
+
+  // 新 provider 使用自己的凭据；未声明 transforms 时请求体保持原样
+  assert.equal(zaiReceived.length, 1);
+  assert.equal(zaiReceived[0].authorization, "Bearer glm-test-key");
+  assert.equal(zaiReceived[0].accountId, undefined);
+  assert.equal(zaiReceived[0].body.model, "glm-4.7");
+  assert.equal(zaiReceived[0].body.service_tier, "priority");
 });

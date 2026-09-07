@@ -3,15 +3,27 @@
   "port": 4010,
   "maxBodyBytes": 67108864,
   "requestTimeoutMs": 600000,
-  "chatgptBaseUrl": "https://chatgpt.com/backend-api/codex/",
-  "deepseekBaseUrl": "https://api.deepseek.com/",
-  "deepseekModels": [
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-    "deepseek-v4-flash-vision-exp"
-  ],
-  "gptModelPrefixes": [
-    "gpt-",
-    "codex-"
+  "providers": [
+    {
+      "id": "chatgpt",
+      "baseUrl": "https://chatgpt.com/backend-api/codex/",
+      "auth": { "type": "chatgpt" },
+      "match": { "prefixes": ["gpt-", "codex-"] },
+      "transforms": ["chatgpt-history"],
+      "retryOnPromptCacheError": true
+    },
+    {
+      "id": "deepseek",
+      "baseUrl": "https://api.deepseek.com/",
+      "auth": { "type": "env", "envVar": "DEEPSEEK_API_KEY" },
+      "match": {
+        "models": [
+          "deepseek-v4-pro",
+          "deepseek-v4-flash",
+          "deepseek-v4-flash-vision-exp"
+        ]
+      },
+      "transforms": ["deepseek-effort", "deepseek-call-ids"]
+    }
   ]
 }

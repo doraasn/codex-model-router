@@ -1,19 +1,15 @@
 @echo off
-rem Restart the local model router in background (127.0.0.1:4010).
+rem Single entry for ALL project functions: double-click opens the menu.
+rem Skip the menu by passing an action name, e.g.: start-router.bat restart
 cd /d "%~dp0"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Stop-Router.ps1"
-if errorlevel 1 (
-  echo.
-  echo Router stop failed.
-  pause
-  exit /b 1
-)
+set "ACTION_ARG="
+if not "%~1"=="" set "ACTION_ARG=-Action %~1"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Start-Background.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage-router.ps1" %ACTION_ARG%
 if errorlevel 1 (
   echo.
-  echo Router startup failed. Check logs\router.err.log
+  echo Action failed. Check the message above.
   pause
   exit /b 1
 )

@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node src/server.mjs",
-    "start:bg": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Start-Background.ps1",
+    "start:bg": "powershell -NoProfile -ExecutionPolicy Bypass -File manage-router.ps1 -Action start",
+    "manage": "powershell -NoProfile -ExecutionPolicy Bypass -File manage-router.ps1",
     "test": "node --test test/*.test.mjs",
     "build:catalog": "node scripts/build-model-catalog.mjs",
     "migrate:sessions": "node scripts/migrate-sessions.mjs"

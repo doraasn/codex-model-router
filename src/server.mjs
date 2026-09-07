@@ -50,9 +50,15 @@ async function readBody(request, maxBytes) {
   return Buffer.concat(chunks);
 }
 
-function routeForModel(model, config) {
-  if (config.deepseekModels.has(model)) return "deepseek";
-  if (config.gptModelPrefixes.some((prefix) => model.startsWith(prefix))) return "chatgpt";
+// 按 provider 配置解析模型：先精确匹配 match.models（Set），再按 match.prefixes 前缀匹配。
+// 新增供应商只需在 config/router.config.json 增加一个 provider 条目，无需改代码。
+function resolveProvider(model, config) {
+  for (const provider of config.providers) {
+    if (provider.match.models?.has?.(model)) return provider;
+  }
+  for (const provider of config.providers) {
+    if (provider.match.prefixes?.some((prefix) => model.startsWith(prefix))) return provider;
+  }
   return null;
 }
 
@@ -69,7 +75,7 @@ const ITEM_ID_PREFIXES = {
   web_search_call: "ws_",
 };
 
-// 清洗发往 ChatGPT 后端的请求体，仅影响 ChatGPT 路由，DeepSeek 请求原样透传：
+// 清洗发往 ChatGPT 后端的请求体，仅挂在 chatgpt provider 上：
 // 1. 把第三方历史条目的 id 确定性规范到官方要求的类型前缀（同一旧 id 每次映射一致）；
 //    call_id 保持原样，function_call_output/custom_tool_call_output 的配对关系不受影响。
 // 2. 官方后端要求 reasoning 条目的 content 必须为空数组，推理摘要只能走 summary 字段；
@@ -128,7 +134,7 @@ const DEEPSEEK_REASONING_EFFORT_MAP = new Map([
 ]);
 
 // DeepSeek 模型将 Codex 的中/高/极高统一映射为官方 low/high/max；
-// 缺省或未知档位回退 high。GPT 不经过此函数。
+// 缺省或未知档位回退 high。GPT 不经过此变换。
 function normalizeDeepSeekPayload(payload) {
   let changed = false;
   const mapEffort = (effort) => DEEPSEEK_REASONING_EFFORT_MAP.get(effort) || "high";
@@ -227,6 +233,14 @@ function sanitizeDeepSeekCallIds(payload) {
   return changed;
 }
 
+// 请求体变换注册表：provider 通过 transforms 数组按序引用。
+// 新供应商的兼容逻辑以新函数加入此处，再在配置里按名挂载。
+const PAYLOAD_TRANSFORMS = new Map([
+  ["chatgpt-history", sanitizeChatGptPayload],
+  ["deepseek-effort", normalizeDeepSeekPayload],
+  ["deepseek-call-ids", sanitizeDeepSeekCallIds],
+]);
+
 function buildChatGptHeaders(incomingHeaders) {
   const headers = new Headers();
   for (const [name, rawValue] of Object.entries(incomingHeaders)) {
@@ -245,14 +259,7 @@ function buildChatGptHeaders(incomingHeaders) {
   return headers;
 }
 
-function isPromptCacheRetentionError(upstream) {
-  if (upstream.status !== 400) return false;
-  return upstream.clone().json()
-    .then((body) => body?.error?.param === "prompt_cache_retention")
-    .catch(() => false);
-}
-
-function buildDeepSeekHeaders(apiKey, incomingHeaders) {
+function buildBearerHeaders(apiKey, incomingHeaders) {
   const headers = new Headers({
     authorization: `Bearer ${apiKey}`,
     "content-type": "application/json",
@@ -260,6 +267,35 @@ function buildDeepSeekHeaders(apiKey, incomingHeaders) {
   });
   if (incomingHeaders["user-agent"]) headers.set("user-agent", incomingHeaders["user-agent"]);
   return headers;
+}
+
+function buildUpstreamHeaders(provider, credential, incomingHeaders) {
+  if (provider.auth.type === "chatgpt") return buildChatGptHeaders(incomingHeaders);
+  return buildBearerHeaders(credential, incomingHeaders);
+}
+
+// 返回值带 error 表示请求应被拒绝；chatgpt 类型要求客户端自带 Bearer 登录态，
+// env 类型从环境变量取 Key（错误码带 provider id：deepseek -> deepseek_key_not_configured）。
+function credentialError(provider, incomingHeaders) {
+  if (provider.auth.type === "chatgpt") {
+    const incoming = incomingHeaders.authorization || "";
+    if (!incoming.startsWith("Bearer ")) {
+      return { status: 401, error: "missing_chatgpt_auth" };
+    }
+    return { credential: "" };
+  }
+  const credential = process.env[provider.auth.envVar] || "";
+  if (!credential) {
+    return { status: 503, error: `${provider.id}_key_not_configured` };
+  }
+  return { credential };
+}
+
+function isPromptCacheRetentionError(upstream) {
+  if (upstream.status !== 400) return false;
+  return upstream.clone().json()
+    .then((body) => body?.error?.param === "prompt_cache_retention")
+    .catch(() => false);
 }
 
 function upstreamUrl(baseUrl, requestUrl) {
@@ -305,35 +341,29 @@ export async function createRouterServer(overrides = {}) {
       }
 
       model = typeof payload.model === "string" ? payload.model.trim() : "";
-      route = routeForModel(model, config);
-      if (!route) {
+      const provider = resolveProvider(model, config);
+      route = provider ? provider.id : route;
+      if (!provider) {
         jsonResponse(response, 400, { error: "unsupported_model", model });
         return;
       }
 
-      const incomingAuthorization = request.headers.authorization || "";
-      if (route === "chatgpt" && !incomingAuthorization.startsWith("Bearer ")) {
-        jsonResponse(response, 401, { error: "missing_chatgpt_auth" });
+      const authResult = credentialError(provider, request.headers);
+      if (authResult.error) {
+        jsonResponse(response, authResult.status, { error: authResult.error });
         return;
       }
 
-      // 仅对 ChatGPT 路由清洗推理条目，保持 DeepSeek 请求原样透传
+      // 按配置顺序执行该 provider 的全部清洗（不用 || 短路：后续变换可能在
+      // 前一个已改写时仍需运行），任一变换生效才重新序列化请求体。
       let requestBody = body;
-      if (route === "chatgpt" && sanitizeChatGptPayload(payload)) {
-        requestBody = Buffer.from(JSON.stringify(payload), "utf8");
-      } else if (route === "deepseek") {
-        // 两个清洗都要执行，不能用 || 短路：第 2 个可能在上一个已改写时仍需跑
-        const normalized = normalizeDeepSeekPayload(payload);
-        const sanitizedCallIds = sanitizeDeepSeekCallIds(payload);
-        if (normalized || sanitizedCallIds) {
-          requestBody = Buffer.from(JSON.stringify(payload), "utf8");
-        }
+      let transformed = false;
+      for (const name of provider.transforms) {
+        const transform = PAYLOAD_TRANSFORMS.get(name);
+        if (transform && transform(payload)) transformed = true;
       }
-
-      const deepSeekKey = process.env.DEEPSEEK_API_KEY || "";
-      if (route === "deepseek" && !deepSeekKey) {
-        jsonResponse(response, 503, { error: "deepseek_key_not_configured" });
-        return;
+      if (transformed) {
+        requestBody = Buffer.from(JSON.stringify(payload), "utf8");
       }
 
       const controller = new AbortController();
@@ -344,12 +374,8 @@ export async function createRouterServer(overrides = {}) {
       request.once("aborted", () => controller.abort(new Error("client aborted")));
 
       try {
-        const baseUrl = route === "deepseek" ? config.deepseekBaseUrl : config.chatgptBaseUrl;
-        const headers =
-          route === "deepseek"
-            ? buildDeepSeekHeaders(deepSeekKey, request.headers)
-            : buildChatGptHeaders(request.headers);
-        const targetUrl = upstreamUrl(baseUrl, request.url);
+        const targetUrl = upstreamUrl(provider.baseUrl, request.url);
+        const headers = buildUpstreamHeaders(provider, authResult.credential, request.headers);
         let upstream = await fetch(targetUrl, {
           method: "POST",
           headers,
@@ -359,17 +385,17 @@ export async function createRouterServer(overrides = {}) {
         });
 
         // ChatGPT 后端偶尔会对带 prompt_cache_key 的 GPT-5.6 长会话后续请求返回
-        // prompt_cache_retention 兼容错误。仅在上游明确返回该参数错误时，去掉
-        // 缓存亲和键重试一次；其他 400 原样返回，DeepSeek 路由也不参与重试。
+        // prompt_cache_retention 兼容错误。仅当 provider 声明 retryOnPromptCacheError
+        // 且上游明确返回该参数错误时，去掉缓存亲和键重试一次；其他 400 原样返回。
         if (
-          route === "chatgpt"
+          provider.retryOnPromptCacheError
           && Object.prototype.hasOwnProperty.call(payload, "prompt_cache_key")
           && await isPromptCacheRetentionError(upstream)
         ) {
           delete payload.prompt_cache_key;
           requestBody = Buffer.from(JSON.stringify(payload), "utf8");
           process.stdout.write(
-            `${new Date().toISOString()} route=chatgpt model=${model} retry=without_prompt_cache_key\n`,
+            `${new Date().toISOString()} route=${provider.id} model=${model} retry=without_prompt_cache_key\n`,
           );
           upstream = await fetch(targetUrl, {
             method: "POST",
