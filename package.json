@@ -14,5 +14,8 @@
     "test": "node --test test/*.test.mjs",
     "build:catalog": "node scripts/build-model-catalog.mjs",
     "migrate:sessions": "node scripts/migrate-sessions.mjs"
+  },
+  "dependencies": {
+    "undici": "^8.10.2"
   }
 }

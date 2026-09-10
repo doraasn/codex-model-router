@@ -152,6 +152,53 @@ function Invoke-RouterStartBackground {
     Write-Host "路由器已启动。launcher_pid=$($process.Id) node_pid=$($listener.OwningProcess)"
 }
 
+# 设置 API Key：查看手动配置说明，或选择供应商录入（当前仅支持 deepseek）。
+function Show-ApiKeyManualGuide {
+    Write-Host ''
+    Write-Host 'Key 明文保存在以下文件（一行即可，UTF-8 编码）：'
+    Write-Host "  $SecretPath"
+    Write-Host '路由启动时读取该文件并注入环境变量 DEEPSEEK_API_KEY；修改后需重启路由器（菜单 1）生效。'
+    Write-Host '该文件已被 Git 忽略，换机器直接复制。对应 config\router.config.json 的 provider 配置示例：'
+    Write-Host ''
+    Write-Host @'
+{
+  "id": "deepseek",
+  "baseUrl": "https://api.deepseek.com/",
+  "auth": { "type": "env", "envVar": "DEEPSEEK_API_KEY" },
+  "match": { "models": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] },
+  "transforms": ["deepseek-effort", "deepseek-call-ids"]
+}
+'@
+    Write-Host ''
+}
+
+function Invoke-SetApiKeyFlow {
+    Clear-Host
+    Write-Host '=============================================='
+    Write-Host ' 设置 API Key'
+    Write-Host '=============================================='
+    Write-Host ' 1) 查看手动配置说明（文件位置与配置示例）'
+    Write-Host ' 2) 选择供应商并录入 API Key'
+    Write-Host ' 0) 返回主菜单'
+    Write-Host ''
+    $choice = Read-Host '请输入选项'
+    if ([string]::IsNullOrEmpty($choice)) { return }
+    switch ($choice) {
+        '1' { Show-ApiKeyManualGuide }
+        '2' {
+            $provider = Read-Host '供应商（当前支持：deepseek）[deepseek]'
+            if (-not $provider) { $provider = 'deepseek' }
+            if ($provider -ne 'deepseek') {
+                Write-Host "暂不支持供应商 $provider。新增供应商需先在 config\router.config.json 的 providers 中声明。"
+                return
+            }
+            Save-DeepSeekKey
+        }
+        '0' { return }
+        default { Write-Host '无效选项。' }
+    }
+}
+
 function Invoke-RouterRestart {
     Invoke-RouterStop
     Invoke-RouterStartBackground
@@ -469,7 +516,7 @@ function Show-Menu {
     Write-Host ' 2) 后台启动路由器'
     Write-Host ' 3) 停止路由器'
     Write-Host ' 4) 健康检查'
-    Write-Host ' 5) 保存 DeepSeek API Key（明文）'
+    Write-Host ' 5) 设置 API Key（供应商密钥）'
     Write-Host ' 6) 重新生成配置（模型目录 + 写入 Codex 配置）'
     Write-Host ' 7) 迁移历史会话标签'
     Write-Host ' 8) 开启登录自启动'
@@ -527,7 +574,7 @@ function Invoke-MenuAction([string]$Choice) {
         '2' { Invoke-RouterStartBackground }
         '3' { Invoke-RouterStop }
         '4' { Invoke-RouterHealth }
-        '5' { Save-DeepSeekKey }
+        '5' { Invoke-SetApiKeyFlow }
         '6' { Invoke-ApplyRouterConfig }
         '7' {
             Write-Host ''

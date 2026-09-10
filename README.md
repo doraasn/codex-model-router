@@ -61,7 +61,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1
 | `restart` | 停止旧实例并后台启动（`start-router.bat` 即此动作） | 1 |
 | `start` / `stop` | 后台启动 / 停止 | 2 / 3 |
 | `health` | 健康检查 | 4 |
-| `set-key` | 交互录入 DeepSeek Key（明文存 `secrets\deepseek-key.txt`） | 5 |
+| `set-key` | 设置供应商 API Key（当前支持 deepseek；含手动配置说明，明文存 `secrets\deepseek-key.txt`） | 5 |
 | `build-catalog` | 生成模型目录，`-MultiAgent v1|v2` 控制协作面（默认 v1） | 6（前半） |
 | `setup-codex` | 备份并合并 Codex 配置（`-DryRun` 预览、`-Force` 重应用） | 6（后半），无独立菜单项 |
 | `migrate-sessions` | 会话标签 `openai → local_router` | 7 |
@@ -94,13 +94,15 @@ node .\scripts\build-model-catalog.mjs --multi-agent v2   # 恢复上游原值�
 4. 完全退出 Codex，把 `model_catalog_json` 一行恢复；
 5. 重新执行本步骤生成目录，再完全重启 Codex。
 
-### 2. 保存 DeepSeek Key（明文）
+### 2. 设置 DeepSeek Key（明文）
+
+菜单 `5`（设置 API Key）：选 `1` 查看手动配置说明（文件位置与 provider 配置示例），或选 `2` 选择供应商 `deepseek` 交互录入。命令行等价：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action set-key
 ```
 
-Key 明文保存在 `secrets\deepseek-key.txt`（Git 忽略），换机器直接复制该文件。
+Key 明文保存在 `secrets\deepseek-key.txt`（对应环境变量 `DEEPSEEK_API_KEY`，Git 忽略），换机器直接复制该文件。修改后需重启路由器生效。
 
 ### 3. 启动路由器
 

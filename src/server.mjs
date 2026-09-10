@@ -2,7 +2,24 @@ import http from "node:http";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { ProxyAgent, fetch as undiciFetch } from "undici";
 import { loadConfig } from "./config.mjs";
+
+// 仅 ChatGPT 路由走代理，DeepSeek 等直连
+const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "";
+const proxyAgent = proxyUrl ? new ProxyAgent({
+  uri: proxyUrl,
+  pipelining: 0,
+  connect: { timeout: 10_000 },
+  // 缩短 keep-alive 超时，避免复用被代理回收的死连接（Undici 定时器有 ~1s 延迟）
+  keepAliveTimeout: 4_000,
+  keepAliveMaxTimeout: 6_000,
+}) : null;
+if (proxyAgent) {
+  process.stdout.write("Proxy available for chatgpt route: " + proxyUrl + "\n");
+} else {
+  process.stdout.write("No proxy configured, all routes use direct connection\n");
+}
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -229,6 +246,29 @@ function sanitizeDeepSeekCallIds(payload) {
       changed = true;
     }
   }
+  // 为「有调用但无输出」的孤儿调用补一个空占位输出，避免 DeepSeek 报
+  // "No tool output found for tool call"。常见于 Codex 续接会话时丢失了
+  // view_image 等工具的输出（大 base64 被截断）。
+  const outputTypeForCall = new Map([
+    ["function_call", "function_call_output"],
+    ["custom_tool_call", "custom_tool_call_output"],
+  ]);
+  for (const [callType, callIds] of unpairedCallsByName.entries()) {
+    for (const callId of callIds) {
+      const outputType = outputTypeForCall.get(callType) || "function_call_output";
+      newInput.push({
+        type: outputType,
+        id: outputType === "function_call_output" ? `fco_${callId}` : `ctco_${callId}`,
+        call_id: callId,
+        output: "[placeholder: tool output was missing from session history]",
+      });
+      process.stderr.write(
+        `${new Date().toISOString()} deepseek-call-ids: patched orphan call_id=${callId} name=${callType}\n`,
+      );
+      changed = true;
+    }
+  }
+
   payload.input = newInput;
   return changed;
 }
@@ -376,13 +416,16 @@ export async function createRouterServer(overrides = {}) {
       try {
         const targetUrl = upstreamUrl(provider.baseUrl, request.url);
         const headers = buildUpstreamHeaders(provider, authResult.credential, request.headers);
-        let upstream = await fetch(targetUrl, {
+        const fetchOpts = {
           method: "POST",
           headers,
           body: requestBody,
           signal: controller.signal,
           redirect: "error",
-        });
+        };
+        // 仅 ChatGPT 路由走代理，DeepSeek 等直连
+        if (proxyAgent && provider.id === "chatgpt") fetchOpts.dispatcher = proxyAgent;
+        let upstream = await undiciFetch(targetUrl, fetchOpts);
 
         // ChatGPT 后端偶尔会对带 prompt_cache_key 的 GPT-5.6 长会话后续请求返回
         // prompt_cache_retention 兼容错误。仅当 provider 声明 retryOnPromptCacheError
@@ -397,13 +440,7 @@ export async function createRouterServer(overrides = {}) {
           process.stdout.write(
             `${new Date().toISOString()} route=${provider.id} model=${model} retry=without_prompt_cache_key\n`,
           );
-          upstream = await fetch(targetUrl, {
-            method: "POST",
-            headers,
-            body: requestBody,
-            signal: controller.signal,
-            redirect: "error",
-          });
+          upstream = await undiciFetch(targetUrl, fetchOpts);
         }
 
         response.statusCode = upstream.status;
@@ -423,6 +460,9 @@ export async function createRouterServer(overrides = {}) {
         clearTimeout(timeout);
       }
     } catch (error) {
+      process.stderr.write(
+        `${new Date().toISOString()} route=${route} model=${model} error=${error.message} code=${error.cause?.code || ""}\n`,
+      );
       if (!response.headersSent) {
         jsonResponse(response, error.statusCode || 502, {
           error: error.name === "AbortError" ? "upstream_timeout" : "upstream_failure",
