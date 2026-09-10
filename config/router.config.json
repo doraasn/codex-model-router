@@ -22,7 +22,7 @@
           "deepseek-flash"
         ]
       },
-      "transforms": ["deepseek-effort", "deepseek-call-ids"]
+      "transforms": ["deepseek-effort", "deepseek-call-ids", "deepseek-tools-dedup"]
     }
   ]
 }

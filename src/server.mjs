@@ -2,19 +2,27 @@ import http from "node:http";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { ProxyAgent, fetch as undiciFetch } from "undici";
+import { ProxyAgent, Agent, fetch as undiciFetch, interceptors } from "undici";
 import { loadConfig } from "./config.mjs";
 
 // 仅 ChatGPT 路由走代理，DeepSeek 等直连
 const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "";
-const proxyAgent = proxyUrl ? new ProxyAgent({
+const baseProxyAgent = proxyUrl ? new ProxyAgent({
   uri: proxyUrl,
   pipelining: 0,
   connect: { timeout: 10_000 },
-  // 缩短 keep-alive 超时，避免复用被代理回收的死连接（Undici 定时器有 ~1s 延迟）
   keepAliveTimeout: 4_000,
   keepAliveMaxTimeout: 6_000,
 }) : null;
+// 给代理加自动重试，解决 SNI 干扰导致的间歇性 ECONNRESET
+const proxyAgent = baseProxyAgent ? baseProxyAgent.compose(
+  interceptors.retry({
+    maxRetries: 3,
+    minTimeout: 300,
+    maxTimeout: 2_000,
+    errorCodes: ['UND_ERR_SOCKET', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT'],
+  }),
+) : null;
 if (proxyAgent) {
   process.stdout.write("Proxy available for chatgpt route: " + proxyUrl + "\n");
 } else {
@@ -273,12 +281,56 @@ function sanitizeDeepSeekCallIds(payload) {
   return changed;
 }
 
+// DeepSeek 要求 tools 中 namespace 名称唯一，但 Codex 长会话会在 input item
+// 中累积重复的 tools 声明（codex_app 等）。按 namespace 去重，保留每个
+// namespace 下的第一个工具定义。
+function deduplicateDeepSeekTools(payload) {
+  if (!payload || !Array.isArray(payload.input)) return false;
+  let changed = false;
+  for (const item of payload.input) {
+    if (!item || typeof item !== "object" || !Array.isArray(item.tools)) continue;
+    const seen = new Set();
+    const deduped = [];
+    for (const tool of item.tools) {
+      const ns = tool && typeof tool.namespace === "string" ? tool.namespace : null;
+      if (ns) {
+        if (seen.has(ns)) { changed = true; continue; }
+        seen.add(ns);
+      }
+      deduped.push(tool);
+    }
+    if (deduped.length !== item.tools.length) {
+      item.tools = deduped;
+      changed = true;
+    }
+  }
+  // 也检查顶层 tools
+  if (Array.isArray(payload.tools)) {
+    const seen = new Set();
+    const deduped = [];
+    for (const tool of payload.tools) {
+      const ns = tool && typeof tool.namespace === "string" ? tool.namespace : null;
+      if (ns) {
+        if (seen.has(ns)) { changed = true; continue; }
+        seen.add(ns);
+      }
+      deduped.push(tool);
+    }
+    if (deduped.length !== payload.tools.length) {
+      payload.tools = deduped;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 // 请求体变换注册表：provider 通过 transforms 数组按序引用。
 // 新供应商的兼容逻辑以新函数加入此处，再在配置里按名挂载。
 const PAYLOAD_TRANSFORMS = new Map([
   ["chatgpt-history", sanitizeChatGptPayload],
   ["deepseek-effort", normalizeDeepSeekPayload],
   ["deepseek-call-ids", sanitizeDeepSeekCallIds],
+  ["deepseek-tools-dedup", deduplicateDeepSeekTools],
 ]);
 
 function buildChatGptHeaders(incomingHeaders) {
