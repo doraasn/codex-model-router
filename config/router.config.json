@@ -18,8 +18,8 @@
       "auth": { "type": "env", "envVar": "DEEPSEEK_API_KEY" },
       "match": {
         "models": [
-          "deepseek-pro",
-          "deepseek-flash"
+          "deepseek-flash",
+          "deepseek-v4-pro"
         ]
       },
       "transforms": ["deepseek-effort", "deepseek-call-ids"]

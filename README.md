@@ -15,7 +15,7 @@
   - `deepseek-effort`：中/高/极高映射为官方 `low/high/max`；删除 `service_tier`/`serviceTier`。
   - `deepseek-call-ids`：为缺失 `call_id` 的工具输出条目按同名未配对调用回填，孤儿输出直接移除；工具声明按 DeepSeek 唯一性约束清理——顶层 `tools` 展开 `namespace` 包装器并按名去重，`input` 条目的 `tools` 保留 `namespace` 结构但全局去重（同名 namespace/工具只保留首个），缺失的 `tools` 字段补为空数组。
 - provider 声明 `retryOnPromptCacheError: true` 时，上游对该缓存参数报 400 会自动去掉 `prompt_cache_key` 重试一次（仅 chatgpt 启用）。
-- 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)）。仅转换官方已声明的 `low/high/max` 档位，不为单个模型补充缺失档位。
+- 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)，取自 DeepSeek 官方 Codex 接入页的 `models.json` 原文）。模型增删只改该文件，生成脚本自动跟随；仅转换官方已声明的 `low/high/max` 档位，不为单个模型补充缺失档位。生成结束会校验目录与 `config/router.config.json` 的路由匹配一致（目录里有路由认不出的模型、或路由声明了目录里没有的模型，都直接报错），避免"重跑一次生成后模型全变 `unsupported_model`"。
 
 ### 多智能体协作面（multi_agent_version）
 
@@ -41,7 +41,7 @@ Codex 桌面端为会话提供跨线程工具 `mcp__codex_app__send_message_to_t
 | `src/config.mjs` | 读取并校验 `config/router.config.json` |
 | `config/router.config.json` | 端口与 providers 列表（新增供应商只改这里） |
 | `config/codex-config-snippet.toml` | Codex 配置片段 |
-| `config/deepseek-official-catalog.json` | DeepSeek 官方模型条目（基准，勿手改） |
+| `config/deepseek-official-catalog.json` | DeepSeek 官方模型条目（基准，勿手改；更新方式：从官方 Codex 接入页复制该页 `models.json` 全文） |
 | `scripts/build-model-catalog.mjs` | 生成本机模型目录 `config/models.json`（支持 `--multi-agent v1/v2`） |
 | `scripts/migrate-sessions.mjs` | 迁移历史会话的 `model_provider` 标签 |
 | `test/*.test.mjs` | 路由行为与官方配置恢复测试 |
@@ -84,7 +84,7 @@ node .\scripts\build-model-catalog.mjs            # 默认 --multi-agent v1
 node .\scripts\build-model-catalog.mjs --multi-agent v2   # 恢复上游原值（v2/上游 pin）
 ```
 
-读取 `%USERPROFILE%\.codex\models_cache.json`，保留 GPT 模型并加入 DeepSeek Pro/Flash/Flash VS exp，输出 `config\models.json`（Git 忽略，每台机器自行生成；若缓存不存在，先启动一次 Codex 再退出后重跑）。模型顺序固定为 Astra、Sol、Terra、Luna、`DS V4 Pro`、`DS V4 Flash`、`DS V4 Flash VS exp`。注意：配置了 `model_catalog_json` 后 Codex 客户端可能不再自动刷新 `models_cache.json`（桌面端列表实时来自服务端、不落盘）；官方缓存未收录的新模型（如 GPT-6 Astra）会以 Sol 条目为模板按官方文档规格自动合成，缓存收录后自动改用官方条目。
+读取 `%USERPROFILE%\.codex\models_cache.json`，保留 GPT 模型并加入 DeepSeek 官方条目（当前为 `deepseek-flash`、`deepseek-v4-pro`），输出 `config\models.json`（Git 忽略，每台机器自行生成；若缓存不存在，先启动一次 Codex 再退出后重跑）。模型顺序固定为 Astra、Sol、Terra、Luna，之后是 DeepSeek 条目（按官方目录顺序）。注意：配置了 `model_catalog_json` 后 Codex 客户端可能不再自动刷新 `models_cache.json`（桌面端列表实时来自服务端、不落盘）；官方缓存未收录的新模型（如 GPT-6 Astra）会以 Sol 条目为模板按官方文档规格自动合成，缓存收录后自动改用官方条目。
 
 #### 刷新官方缓存（官方上新模型后执行）
 

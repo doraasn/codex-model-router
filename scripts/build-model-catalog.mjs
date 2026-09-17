@@ -28,12 +28,13 @@ if (!Array.isArray(catalog.models) || catalog.models.length === 0) {
 
 const officialDeepSeekPath = fileURLToPath(new URL("../config/deepseek-official-catalog.json", import.meta.url));
 const officialDeepSeekCatalog = JSON.parse(await readFile(officialDeepSeekPath, "utf8"));
-const deepSeekSlugs = ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"];
-const officialDeepSeekModels = deepSeekSlugs.map((slug) => {
-  const model = (officialDeepSeekCatalog.models || []).find((candidate) => candidate.slug === slug);
-  if (!model) throw new Error(`DeepSeek official catalog is missing ${slug}`);
-  return model;
-});
+// 官方基准文件即 DeepSeek 官方 Codex 接入页 models.json 的原文：模型增删只改这个文件，
+// 生成脚本自动跟随（不再硬编码 slug 列表，避免目录、路由匹配、显示名再次各说各话）。
+const officialDeepSeekModels = officialDeepSeekCatalog.models || [];
+if (officialDeepSeekModels.length === 0) {
+  throw new Error("DeepSeek official catalog contains no models");
+}
+const deepSeekSlugs = officialDeepSeekModels.map((model) => model.slug);
 const hiddenCompatibilityModels = new Set([
   "codex-auto-review",
   "gpt-5.4",
@@ -67,12 +68,6 @@ const codexDefaultReasoningByDeepSeekEffort = new Map([
 // low/high/max 档位，不为单个模型补充官方未声明的档位。
 const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
   const model = structuredClone(officialModel);
-  const isVision = officialModel.slug === "deepseek-v4-flash-vision-exp";
-  model.display_name = officialModel.slug === "deepseek-v4-pro"
-    ? "DS V4 Pro"
-    : isVision
-      ? "DS V4 Flash VS exp"
-      : "DS V4 Flash";
   model.default_reasoning_level =
     codexDefaultReasoningByDeepSeekEffort.get(model.default_reasoning_level)
     || model.default_reasoning_level;
@@ -87,9 +82,8 @@ const preferredOrder = new Map([
   ["gpt-5.6-sol", 1],
   ["gpt-5.6-terra", 2],
   ["gpt-5.6-luna", 3],
-  ["deepseek-v4-pro", 4],
-  ["deepseek-v4-flash", 5],
-  ["deepseek-v4-flash-vision-exp", 6],
+  // DeepSeek 条目排在 GPT 之后，顺序跟随官方目录
+  ...deepSeekSlugs.map((slug, index) => [slug, 4 + index]),
 ]);
 
 const models = catalog.models
@@ -149,5 +143,35 @@ models.sort((left, right) => {
 models.forEach((model, index) => {
   model.priority = index + 1;
 });
+
+// 防漂移校验（可用 --router-config 指向其它配置做测试）：目录里的每个模型都必须能被
+// router.config.json 的某个 provider 匹配，provider 精确声明的模型也必须存在于目录里。
+// 否则 Codex 选到该模型会被路由直接判 unsupported_model —— 历史故障就是生成脚本产出
+// deepseek-v4-*，而路由只认 deepseek-flash。
+const routerConfigPath = resolve(
+  argument("--router-config", fileURLToPath(new URL("../config/router.config.json", import.meta.url))),
+);
+const routerConfig = JSON.parse(await readFile(routerConfigPath, "utf8"));
+const providers = Array.isArray(routerConfig.providers) ? routerConfig.providers : [];
+const unroutableSlugs = models
+  .map((model) => model.slug)
+  .filter((slug) => !providers.some((provider) => {
+    const match = provider.match || {};
+    const exact = Array.isArray(match.models) ? match.models : [];
+    const prefixes = Array.isArray(match.prefixes) ? match.prefixes : [];
+    return exact.includes(slug) || prefixes.some((prefix) => slug.startsWith(prefix));
+  }));
+if (unroutableSlugs.length > 0) {
+  throw new Error(`router config ${routerConfigPath} cannot route: ${unroutableSlugs.join(", ")}`);
+}
+const missingFromCatalog = providers
+  .flatMap((provider) => (provider.match && Array.isArray(provider.match.models) ? provider.match.models : []))
+  .filter((slug) => !models.some((model) => model.slug === slug));
+if (missingFromCatalog.length > 0) {
+  throw new Error(`router config ${routerConfigPath} declares models missing from the catalog: ${missingFromCatalog.join(", ")}`);
+}
+
 await writeFile(outputPath, `${JSON.stringify({ models }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-process.stdout.write(`Wrote ${models.length} models to ${outputPath} (multi_agent_version=${multiAgentVersion})\n`);
+process.stdout.write(
+  `Wrote ${models.length} models to ${outputPath} (multi_agent_version=${multiAgentVersion}, route check ok)\n`,
+);
