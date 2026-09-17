@@ -582,6 +582,108 @@ test("backfills missing call_id on DeepSeek input items only", async (t) => {
   assert.equal(gptInput[5].call_id, undefined);
 });
 
+test("deduplicates DeepSeek tool declarations across top-level tools and input items", async (t) => {
+  const chatGptReceived = [];
+  const deepSeekReceived = [];
+  const chatGptServer = mockUpstream(chatGptReceived);
+  const deepSeekServer = mockUpstream(deepSeekReceived);
+  const chatGptPort = await listen(chatGptServer);
+  const deepSeekPort = await listen(deepSeekServer);
+  t.after(() => chatGptServer.close());
+  t.after(() => deepSeekServer.close());
+
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  t.after(() => delete process.env.DEEPSEEK_API_KEY);
+
+  const router = await createRouterServer({
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
+  });
+  const routerPort = await listen(router);
+  t.after(() => router.close());
+
+  const headers = {
+    authorization: "Bearer chatgpt-test-token",
+    "content-type": "application/json",
+  };
+  const fn = (name, description) => ({
+    type: "function",
+    name,
+    description,
+    strict: false,
+    parameters: { type: "object", properties: {}, required: [] },
+  });
+  // Codex 每个已发现的 MCP namespace 会同时出现在顶层 tools 和历史 tool_search_output 条目里
+  const ideaNamespace = () => ({
+    type: "namespace",
+    name: "mcp__idea",
+    description: "Tools in the mcp__idea namespace.",
+    tools: [fn("get_run_configurations", "列出运行配置"), fn("execute_run_configuration", "执行运行配置")],
+  });
+  const searchCall = (callId) => ({
+    type: "tool_search_call",
+    id: `tsc_${callId}`,
+    call_id: callId,
+    status: "completed",
+    execution: "client",
+    arguments: { query: "idea mcp", limit: 10 },
+  });
+  const searchOutput = (callId, tools) => ({
+    type: "tool_search_output",
+    id: `tso_${callId}`,
+    call_id: callId,
+    status: "completed",
+    execution: "client",
+    tools,
+  });
+  const payload = {
+    model: "deepseek-v4-pro",
+    tools: [fn("exec_command", "跑命令"), fn("exec_command", "重复定义"), ideaNamespace()],
+    input: [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "用 idea mcp 重启下后端" }] },
+      searchCall("call_idea_1"),
+      searchOutput("call_idea_1", [ideaNamespace()]),
+      searchCall("call_idea_2"),
+      searchOutput("call_idea_2", [ideaNamespace()]),
+      // 客户端在搜索结果为空时会省略 tools 字段，DeepSeek 会直接报 missing field `tools`
+      { type: "tool_search_output", id: "tso_empty", call_id: "call_empty", status: "completed", execution: "client" },
+    ],
+  };
+
+  const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  assert.equal(deepSeekResponse.status, 200);
+  await deepSeekResponse.text();
+
+  // 顶层 tools 展开 namespace 后按 name 去重，DeepSeek 侧模型仍按平铺工具名调用
+  const toolNames = deepSeekReceived[0].body.tools.map((tool) => tool.name);
+  assert.deepEqual(toolNames, ["exec_command", "get_run_configurations", "execute_run_configuration"]);
+  const firstOutput = deepSeekReceived[0].body.input[2];
+  assert.equal(firstOutput.tools.length, 1);
+  assert.equal(firstOutput.tools[0].name, "mcp__idea");
+  assert.deepEqual(firstOutput.tools[0].tools.map((tool) => tool.name), ["get_run_configurations", "execute_run_configuration"]);
+  // input 条目保留 namespace 结构，只丢弃重复声明（不能展开，展开后与顶层平铺工具重名）
+  assert.deepEqual(deepSeekReceived[0].body.input[4].tools, []);
+  // 缺失的 tools 字段补成空数组
+  assert.deepEqual(deepSeekReceived[0].body.input[5].tools, []);
+
+  // GPT 路由不做 DeepSeek 专有清洗，tools 结构原样透传
+  const gptResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...payload, model: "gpt-5.6-sol" }),
+  });
+  assert.equal(gptResponse.status, 200);
+  await gptResponse.text();
+  const gptBody = chatGptReceived[0].body;
+  assert.equal(gptBody.tools.length, 3);
+  assert.equal(gptBody.tools[2].type, "namespace");
+  assert.equal(gptBody.input[2].tools[0].name, "mcp__idea");
+  assert.equal(gptBody.input[5].tools, undefined);
+});
+
 test("supports additional providers declared in config without code changes", async (t) => {
   const zaiReceived = [];
   const zaiServer = mockUpstream(zaiReceived);

@@ -13,7 +13,7 @@
 - 每个 provider 通过 `transforms` 数组按序挂载请求清洗（见 `src/server.mjs` 的 `PAYLOAD_TRANSFORMS` 注册表）：
   - `chatgpt-history`：第三方历史条目 id 规范化到官方类型前缀（`msg_`/`rs_`/`fc_`/`fco_`/`ctc_`/`ctco_`/`ws_`）；`reasoning.content` 迁移到 `summary` 并清空 `content`；递归删除旧参数 `prompt_cache_retention`。
   - `deepseek-effort`：中/高/极高映射为官方 `low/high/max`；删除 `service_tier`/`serviceTier`。
-  - `deepseek-call-ids`：为缺失 `call_id` 的工具输出条目按同名未配对调用回填，孤儿输出直接移除。
+  - `deepseek-call-ids`：为缺失 `call_id` 的工具输出条目按同名未配对调用回填，孤儿输出直接移除；工具声明按 DeepSeek 唯一性约束清理——顶层 `tools` 展开 `namespace` 包装器并按名去重，`input` 条目的 `tools` 保留 `namespace` 结构但全局去重（同名 namespace/工具只保留首个），缺失的 `tools` 字段补为空数组。
 - provider 声明 `retryOnPromptCacheError: true` 时，上游对该缓存参数报 400 会自动去掉 `prompt_cache_key` 重试一次（仅 chatgpt 启用）。
 - 模型目录以 DeepSeek 官方 Codex 条目为基准（[config/deepseek-official-catalog.json](config/deepseek-official-catalog.json)）。仅转换官方已声明的 `low/high/max` 档位，不为单个模型补充缺失档位。
 

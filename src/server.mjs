@@ -278,49 +278,66 @@ function sanitizeDeepSeekCallIds(payload) {
   }
 
   payload.input = newInput;
-  return changed;
-}
 
-// DeepSeek 要求 tools 中 namespace 名称唯一，但 Codex 长会话会在 input item
-// 中累积重复的 tools 声明（codex_app 等）。按 namespace 去重，保留每个
-// namespace 下的第一个工具定义。
-function deduplicateDeepSeekTools(payload) {
-  if (!payload || !Array.isArray(payload.input)) return false;
-  let changed = false;
-  for (const item of payload.input) {
-    if (!item || typeof item !== "object" || !Array.isArray(item.tools)) continue;
-    const seen = new Set();
-    const deduped = [];
-    for (const tool of item.tools) {
-      const ns = tool && typeof tool.namespace === "string" ? tool.namespace : null;
-      if (ns) {
-        if (seen.has(ns)) { changed = true; continue; }
-        seen.add(ns);
+  // ---- tools 清理：DeepSeek 的工具唯一性约束 ----
+  // DeepSeek 的校验集合包含「顶层 tools」与「各 input 条目的 tools」：平铺函数名重复报
+  // "Tool names must be unique."，namespace 名重复报 "Duplicate namespace name ..."，
+  // 同一 namespace 内子工具重名报 "Tool names within a namespace must be unique."。
+  // Codex 会把每个已发现的 MCP namespace 同时写进顶层 tools 与历史 tool_search_output
+  // 条目，长会话还会反复搜索同一 namespace，因此必须按出现顺序全局去重。
+  // 顶层 tools 展开 namespace 包装器：DeepSeek 侧模型按平铺工具名调用，Codex 能解析回 MCP 工具；
+  // input 条目的 tools 保留 namespace 结构（展开后反而会与顶层平铺工具重名），只丢弃重复声明。
+  // `tools` 字段不能省略，DeepSeek 会报 "input: missing field `tools`"。
+  const seenToolNames = new Set();
+  const dedupToolNames = (tools, seen = new Set()) => {
+    const kept = [];
+    for (const tool of tools) {
+      const key = (tool && (tool.name || tool.type)) || JSON.stringify(tool);
+      if (seen.has(key)) {
+        changed = true;
+        continue;
       }
-      deduped.push(tool);
+      seen.add(key);
+      kept.push(tool);
     }
-    if (deduped.length !== item.tools.length) {
-      item.tools = deduped;
-      changed = true;
+    return kept;
+  };
+
+  function unwrapNamespaces(tools) {
+    const out = [];
+    for (const t of tools) {
+      if (t && t.type === "namespace" && Array.isArray(t.tools)) {
+        for (const sub of t.tools) out.push(sub);
+        changed = true;
+      } else {
+        out.push(t);
+      }
     }
+    return out;
   }
-  // 也检查顶层 tools
   if (Array.isArray(payload.tools)) {
-    const seen = new Set();
-    const deduped = [];
-    for (const tool of payload.tools) {
-      const ns = tool && typeof tool.namespace === "string" ? tool.namespace : null;
-      if (ns) {
-        if (seen.has(ns)) { changed = true; continue; }
-        seen.add(ns);
-      }
-      deduped.push(tool);
-    }
-    if (deduped.length !== payload.tools.length) {
-      payload.tools = deduped;
-      changed = true;
-    }
+    payload.tools = dedupToolNames(unwrapNamespaces(payload.tools), seenToolNames);
   }
+  for (const item of payload.input) {
+    if (!item || typeof item !== "object") continue;
+    if (!Array.isArray(item.tools)) {
+      // tool_search_output 必须带 tools 字段，DeepSeek 允许空数组但不允许缺字段
+      if (item.type === "tool_search_output") {
+        item.tools = [];
+        changed = true;
+      }
+      continue;
+    }
+    const tools = dedupToolNames(item.tools, seenToolNames);
+    for (const tool of tools) {
+      // namespace 内部子工具同样按名去重，重名会被 DeepSeek 拒绝
+      if (tool && tool.type === "namespace" && Array.isArray(tool.tools)) {
+        tool.tools = dedupToolNames(tool.tools);
+      }
+    }
+    item.tools = tools;
+  }
+
   return changed;
 }
 
@@ -330,7 +347,6 @@ const PAYLOAD_TRANSFORMS = new Map([
   ["chatgpt-history", sanitizeChatGptPayload],
   ["deepseek-effort", normalizeDeepSeekPayload],
   ["deepseek-call-ids", sanitizeDeepSeekCallIds],
-  ["deepseek-tools-dedup", deduplicateDeepSeekTools],
 ]);
 
 function buildChatGptHeaders(incomingHeaders) {
