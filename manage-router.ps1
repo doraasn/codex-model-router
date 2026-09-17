@@ -103,8 +103,14 @@ function Invoke-RouterStartBackground {
     try {
         $health = Invoke-RestMethod -Uri "http://127.0.0.1:$RouterPort/healthz" -TimeoutSec 1
         if ($health.status -eq 'ok') {
-            Write-Host "路由器已在运行且健康：http://127.0.0.1:$RouterPort"
-            return
+            # 端口仍被占用，强制杀掉旧进程后继续启动
+            Write-Host "检测到旧路由器仍在运行，正在强制停止..."
+            Invoke-RouterStop
+            for ($wait = 0; $wait -lt 20; $wait++) {
+                $occupied = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $RouterPort -State Listen -ErrorAction SilentlyContinue
+                if (-not $occupied) { break }
+                Start-Sleep -Milliseconds 250
+            }
         }
     } catch {
         # Expected when the router is not running.
@@ -201,6 +207,12 @@ function Invoke-SetApiKeyFlow {
 
 function Invoke-RouterRestart {
     Invoke-RouterStop
+    # 等待端口完全释放，最多 5 秒
+    for ($wait = 0; $wait -lt 20; $wait++) {
+        $occupied = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $RouterPort -State Listen -ErrorAction SilentlyContinue
+        if (-not $occupied) { break }
+        Start-Sleep -Milliseconds 250
+    }
     Invoke-RouterStartBackground
 }
 
@@ -618,7 +630,7 @@ function Invoke-Action([string]$Name) {
         '' { return 'menu' }
         'menu' { return 'menu' }
         'serve' { Invoke-RouterServe }
-        'start' { Invoke-RouterStartBackground }
+        'start' { Invoke-RouterRestart }
         'stop' { Invoke-RouterStop }
         'restart' { Invoke-RouterRestart }
         'health' { Invoke-RouterHealth }
