@@ -273,8 +273,8 @@ function Invoke-SetupCodex {
         return
     }
 
-    # Extract the three top-level keys and the local_router section from the snippet.
-    $topKeys = [regex]::Matches($snippetText, '(?m)^(model|model_provider|model_catalog_json)\s*=.*$') |
+    # Extract the managed top-level keys and the local_router section from the snippet.
+    $topKeys = [regex]::Matches($snippetText, '(?m)^(model|model_reasoning_effort|model_provider|model_catalog_json)\s*=.*$') |
         ForEach-Object { $_.Value }
     # model_catalog_json must point at this project's actual location, never a hardcoded path.
     $topKeys = $topKeys | ForEach-Object {
@@ -300,8 +300,8 @@ function Invoke-SetupCodex {
         $restText = ''
     }
 
-    # Remove the old three keys from the top-level area only (table-internal fields are untouched).
-    $topBlock = [regex]::Replace($topBlock, '(?m)^\s*(model|model_provider|model_catalog_json)\s*=.*(?:\r?\n|$)', '')
+    # Remove the old managed keys from the top-level area only (table-internal fields are untouched).
+    $topBlock = [regex]::Replace($topBlock, '(?m)^\s*(model|model_reasoning_effort|model_provider|model_catalog_json)\s*=.*(?:\r?\n|$)', '')
 
     # Remove any existing local_router section from the table area.
     $restText = [regex]::Replace($restText, '(?ms)^\[model_providers\.local_router\][^\r\n]*\r?\n(?:[^\r\n\[\]]*(?:\r?\n|$))*', '')

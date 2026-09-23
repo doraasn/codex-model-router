@@ -42,9 +42,34 @@ Codex 桌面端为会话提供跨线程工具 `mcp__codex_app__send_message_to_t
 | `config/router.config.json` | 端口与 providers 列表（新增供应商只改这里） |
 | `config/codex-config-snippet.toml` | Codex 配置片段 |
 | `config/deepseek-official-catalog.json` | DeepSeek 官方模型条目（基准，勿手改；更新方式：从官方 Codex 接入页复制该页 `models.json` 全文） |
-| `scripts/build-model-catalog.mjs` | 生成本机模型目录 `config/models.json`（支持 `--multi-agent v1/v2`） |
+| `config/models.json` | 生成好的模型目录（已提交，Codex 通过 `model_catalog_json` 直接读取） |
+| `config/models.meta.json` | 模型目录元信息：生成时间、官方目录抓取时间、官方 client_version、可见模型清单 |
+| `scripts/fetch-official-catalog.mjs` | 用本机登录态拉取官方模型目录并刷新 `%USERPROFILE%\.codex\models_cache.json`（原文件先备份） |
+| `scripts/build-model-catalog.mjs` | 生成 `config/models.json` 与 `config/models.meta.json`（支持 `--multi-agent v1/v2`） |
 | `scripts/migrate-sessions.mjs` | 迁移历史会话的 `model_provider` 标签 |
 | `test/*.test.mjs` | 路由行为与官方配置恢复测试 |
+
+## 模型列表（已随仓库提供）
+
+`config/models.json` 已提交进仓库，克隆后无需任何抓取即可直接使用：`config/codex-config-snippet.toml` 的 `model_catalog_json` 由 `-Action setup-codex` 自动改写成本机实际路径，指向这份目录。
+
+文件里只有模型 slug、显示名、档位、上下文参数和官方下发的模型说明文本，**不含任何令牌、API Key 或账号信息**（登录态只存在于 `%USERPROFILE%\.codex\auth.json`，不随仓库分发）。
+
+| 想知道 | 看 `config/models.meta.json` |
+|---|---|
+| 这份列表什么时候生成的 | `generated_at` |
+| 官方目录什么时候抓的 | `official_fetched_at` |
+| 按哪个客户端版本抓的 | `official_client_version` |
+| 一共几条、哪些可见 | `model_count`、`visible_models` |
+
+### 拉取官方最新模型列表并合并
+
+```powershell
+npm run fetch:catalog    # 拉官方目录，刷新 %USERPROFILE%\.codex\models_cache.json（原文件先备份到 backups\）
+npm run build:catalog    # 合并「官方 GPT 条目 + DeepSeek 官方条目」，重写 config/models.json 与 config/models.meta.json
+```
+
+`fetch:catalog` 用 `%USERPROFILE%\.codex\auth.json` 的 ChatGPT 登录态请求 `GET https://chatgpt.com/backend-api/codex/models?client_version=<版本>`（与桌面端同一个接口）。**版本门控**：服务端按 `client_version` 裁剪目录——低于 `0.153` 不下发 GPT-6（只有隐藏的 `gpt-reserve` 兜底），`0.153.x` 只给 Astra，`0.155+` 才给 Astra/Sol/Luna 全套；脚本默认取本机 `codex --version`，可用 `--client-version` 覆盖。拉不到 GPT-6 是该版本的正常结果，不要硬塞。合并规则见下方「生成模型目录」，改完提交 `config/models.json` 与 `config/models.meta.json` 即可。
 
 ## 统一管理脚本
 
@@ -84,15 +109,15 @@ node .\scripts\build-model-catalog.mjs            # 默认 --multi-agent v1
 node .\scripts\build-model-catalog.mjs --multi-agent v2   # 恢复上游原值（v2/上游 pin）
 ```
 
-读取 `%USERPROFILE%\.codex\models_cache.json`，保留 GPT 模型并加入 DeepSeek 官方条目（当前为 `deepseek-flash`、`deepseek-v4-pro`），输出 `config\models.json`（Git 忽略，每台机器自行生成；若缓存不存在，先启动一次 Codex 再退出后重跑）。模型顺序固定为 Astra、Sol、Terra、Luna，之后是 DeepSeek 条目（按官方目录顺序）。注意：配置了 `model_catalog_json` 后 Codex 客户端可能不再自动刷新 `models_cache.json`（桌面端列表实时来自服务端、不落盘）；官方缓存未收录的新模型（如 GPT-6 Astra）会以 Sol 条目为模板按官方文档规格自动合成，缓存收录后自动改用官方条目。
+读取 `%USERPROFILE%\.codex\models_cache.json`，保留 GPT 模型并加入 DeepSeek 官方条目，输出 `config\models.json` 与 `config\models.meta.json`（两者都已提交进仓库，克隆后可直接使用；缓存不存在时先执行 `npm run fetch:catalog` 拉取）。可见列表：GPT-6 Astra、GPT-6 Sol、GPT-6 Luna，之后是 DeepSeek 条目（按官方目录顺序），其余为 `hide`。显示名、档位、上下文等一律以官方条目为准；只有 `hiddenCompatibilityModels` 与 DeepSeek `localOverrides` 会改写可见性。注意：官方缓存里没有的 GPT-6 条目会以同档 5.6 条目为模板合成兜底（1.05M 上下文；Astra=`low`、Sol=`medium`、Luna=`high`），一旦缓存收录官方条目就自动改用官方值（官方 `context_window` 为 272000、`max_context_window` 为 872000）。
 
-#### 刷新官方缓存（官方上新模型后执行）
+`hiddenCompatibilityModels` 里的模型只在列表隐藏、仍可正常路由：`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`（官方 2026-10-14 从 Codex 退市）、`gpt-5.4`、`gpt-5.4-mini`，外加官方本身就标 `hide` 的 `gpt-reserve`、`codex-auto-review`。隐藏 5.6 Sol 的依据是官方两套计费口径下 GPT-6 Sol 都正好是它的一半，能力不降：Codex 额度按每 1M tokens 计，GPT-6 Sol 为 50/5/250 credits（输入/缓存输入/输出），GPT-5.6 Sol 为 100/10/500 credits；API 标准档单价 gpt-6-sol 为 $2/$0.2/$10，gpt-5.6-sol 为 $4/$0.4/$20。来源：[Codex 定价](https://learn.chatgpt.com/docs/pricing)、[OpenAI API 定价](https://developers.openai.com/api/docs/pricing)。
 
-1. 完全退出 Codex 桌面端；
-2. 备份 `%USERPROFILE%\.codex\config.toml`，临时注释（或删除）顶层的 `model_catalog_json = "..."` 一行；
-3. 打开 Codex 桌面端，等待其联网刷新模型列表；确认 `%USERPROFILE%\.codex\models_cache.json` 的更新时间变新且包含新模型（如 `gpt-6-astra`）；
-4. 完全退出 Codex，把 `model_catalog_json` 一行恢复；
-5. 重新执行本步骤生成目录，再完全重启 Codex。
+DeepSeek 条目默认沿用官方 slug/显示名，只有 `localOverrides` 里显式列出的会改名或隐藏。当前覆盖：官方 `deepseek-v4-pro` → 面向 Codex 的 `deepseek-pro`（显示名 `DeepSeek-Pro`，`visibility: hide` 暂时隐藏）。**改名必须在 `config/router.config.json` 的 `modelAliases` 里把新 slug 映射回官方 slug**（如 `"deepseek-pro": "deepseek-v4-pro"`），否则上游会收到 DeepSeek 不认识的模型名；生成脚本会校验 `modelAliases` 的目标是否为已知模型名，写错直接报错。
+
+#### 刷新官方模型目录（官方上新模型后执行）
+
+见上文「模型列表（已随仓库提供）」一节：`npm run fetch:catalog` → `npm run build:catalog`，最后完全重启 Codex。也可以走桌面端手动刷新：完全退出 Codex → 临时移除 `config.toml` 的 `model_catalog_json` 一行 → 打开 Codex 等其联网刷新后再退出并恢复该行。
 
 ### 2. 设置 DeepSeek Key（明文）
 
@@ -122,7 +147,7 @@ npm run start:bg
 powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action setup-codex
 ```
 
-自动备份到 `backups\config.toml.<时间戳>.bak`，把片段中的顶层字段与 `[model_providers.local_router]` 合并进 `%USERPROFILE%\.codex\config.toml`；`model_catalog_json` 自动填本机实际路径；保留原有 MCP/插件/沙箱设置；幂等。合并后完全退出并重开 Codex 桌面端。
+自动备份到 `backups\config.toml.<时间戳>.bak`，把片段中的顶层字段与 `[model_providers.local_router]` 合并进 `%USERPROFILE%\.codex\config.toml`；`model_catalog_json` 自动填本机实际路径；保留原有 MCP/插件/沙箱设置；幂等（已配置过时需加 `-Force` 重新应用）。受管的顶层字段为 `model`、`model_reasoning_effort`、`model_provider`、`model_catalog_json`，当前片段给出默认模型 `gpt-6-sol` 与 `model_reasoning_effort = "medium"`（Sol 的官方默认档位）。合并后完全退出并重开 Codex 桌面端。
 
 ### 5. 迁移历史会话（必做）
 
@@ -202,4 +227,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action 
 npm test
 ```
 
-14 项测试覆盖：凭据隔离、档位映射、service tier 与缓存清洗、历史 id 规范化、call_id 回填、未知模型拒绝、凭据缺失 fail closed、配置内声明新 provider 即插即用，以及官方配置恢复（含会话标签迁移）。测试使用本地模拟上游与临时目录，不访问真实 API。
+测试覆盖：模型目录生成（DeepSeek 官方基准、GPT-6 合成与 5.6 Sol 隐藏、路由/别名一致性校验）、凭据隔离、档位映射、service tier 与缓存清洗、历史 id 规范化、call_id 回填、未知模型拒绝、凭据缺失 fail closed、配置内声明新 provider 即插即用，以及官方配置恢复（含会话标签迁移）。测试使用本地模拟上游与临时目录，不访问真实 API。

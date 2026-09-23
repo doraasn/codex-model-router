@@ -732,3 +732,36 @@ test("supports additional providers declared in config without code changes", as
   assert.equal(zaiReceived[0].body.model, "glm-4.7");
   assert.equal(zaiReceived[0].body.service_tier, "priority");
 });
+
+test("rewrites aliased model names to the upstream model id", async (t) => {
+  const deepSeekReceived = [];
+  const deepSeekServer = mockUpstream(deepSeekReceived);
+  const deepSeekPort = await listen(deepSeekServer);
+  t.after(() => deepSeekServer.close());
+
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  t.after(() => delete process.env.DEEPSEEK_API_KEY);
+
+  const config = routerConfig({ chatgptPort: 1, deepseekPort: deepSeekPort });
+  // 本地目录把官方 deepseek-v4-pro 改名为 deepseek-pro，路由必须把请求还原成官方 slug
+  config.providers[1].match = { models: new Set(["deepseek-pro"]), prefixes: [] };
+  config.providers[1].modelAliases = new Map([["deepseek-pro", "deepseek-v4-pro"]]);
+
+  const router = await createRouterServer({ config });
+  const routerPort = await listen(router);
+  t.after(() => router.close());
+
+  const response = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer chatgpt-test-token",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ model: "deepseek-pro", input: "hello" }),
+  });
+  assert.equal(response.status, 200);
+  await response.text();
+
+  assert.equal(deepSeekReceived.length, 1);
+  assert.equal(deepSeekReceived[0].body.model, "deepseek-v4-pro");
+});

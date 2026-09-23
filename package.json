@@ -12,6 +12,7 @@
     "start:bg": "powershell -NoProfile -ExecutionPolicy Bypass -File manage-router.ps1 -Action start",
     "manage": "powershell -NoProfile -ExecutionPolicy Bypass -File manage-router.ps1",
     "test": "node --test test/*.test.mjs",
+    "fetch:catalog": "node scripts/fetch-official-catalog.mjs",
     "build:catalog": "node scripts/build-model-catalog.mjs",
     "migrate:sessions": "node scripts/migrate-sessions.mjs"
   },

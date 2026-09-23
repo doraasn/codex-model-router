@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 function argument(name, fallback) {
@@ -37,9 +37,24 @@ if (officialDeepSeekModels.length === 0) {
 const deepSeekSlugs = officialDeepSeekModels.map((model) => model.slug);
 const hiddenCompatibilityModels = new Set([
   "codex-auto-review",
+  // GPT-6 Sol 官方单价（Codex 额度与 API）都是 GPT-5.6 Sol 的一半，能力不降，列表只保留 6 Sol。
+  "gpt-5.6-sol",
+  // 5.6 全系与 5.5 已被 GPT-6 取代（5.5 官方 2026-10-14 从 Codex 退市），本地不再显示。
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
   "gpt-5.4",
   "gpt-5.4-mini",
 ]);
+// 本地改名 / 隐藏覆盖：键为官方 slug，值覆盖面向 Codex 的 slug、显示名和可见性。
+// 官方基准文件保持原文，改名只在本地目录生效；因此 router.config.json 必须同步
+// modelAliases 把新 slug 映射回官方 slug，否则上游会收到 DeepSeek 不认识的模型名。
+const localOverrides = new Map([
+  ["deepseek-v4-pro", { slug: "deepseek-pro", display_name: "DeepSeek-Pro", visibility: "hide" }],
+]);
+// 目录里实际使用的 DeepSeek slug（改名后可能与官方 slug 不同），排序按它计算。
+const deepSeekLocalSlugs = officialDeepSeekModels
+  .map((model) => localOverrides.get(model.slug)?.slug || model.slug);
 
 function normalizeModel(model) {
   return {
@@ -68,6 +83,7 @@ const codexDefaultReasoningByDeepSeekEffort = new Map([
 // low/high/max 档位，不为单个模型补充官方未声明的档位。
 const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
   const model = structuredClone(officialModel);
+  Object.assign(model, localOverrides.get(officialModel.slug));
   model.default_reasoning_level =
     codexDefaultReasoningByDeepSeekEffort.get(model.default_reasoning_level)
     || model.default_reasoning_level;
@@ -79,11 +95,10 @@ const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
 
 const preferredOrder = new Map([
   ["gpt-6-astra", 0],
-  ["gpt-5.6-sol", 1],
-  ["gpt-5.6-terra", 2],
-  ["gpt-5.6-luna", 3],
+  ["gpt-6-sol", 1],
+  ["gpt-6-luna", 2],
   // DeepSeek 条目排在 GPT 之后，顺序跟随官方目录
-  ...deepSeekSlugs.map((slug, index) => [slug, 4 + index]),
+  ...deepSeekLocalSlugs.map((slug, index) => [slug, 3 + index]),
 ]);
 
 const models = catalog.models
@@ -94,26 +109,54 @@ const models = catalog.models
     : model);
 models.push(...deepSeekModels);
 
-// GPT-6 Astra 已官方发布（旗舰，1.05M 上下文），但本机 models_cache.json 迟迟未收录
-// （桌面端模型列表实时来自服务端、不落盘）。缓存收录之前，以 gpt-5.6-sol 条目为模板、
-// 按官方文档规格合成目录条目；缓存一旦收录，下方过滤会去重并由官方条目接管。
-const cacheHasAstra = catalog.models.some((model) => model.slug === "gpt-6-astra");
-if (!cacheHasAstra) {
-  const solEntry = catalog.models.find((model) => model.slug === "gpt-5.6-sol");
-  if (!solEntry) throw new Error("gpt-5.6-sol missing from cache; cannot synthesize gpt-6-astra");
-  const astra = structuredClone(normalizeModel(solEntry));
-  astra.slug = "gpt-6-astra";
-  astra.display_name = "GPT-6 Astra";
-  astra.description = "Our most capable model, built for the hardest end-to-end work";
-  astra.supported_reasoning_levels = (astra.supported_reasoning_levels || []).filter(
-    (level) => ["low", "medium", "high", "xhigh", "max"].includes(level.effort),
-  );
-  astra.default_reasoning_level = "high";
-  astra.context_window = 1050000;
-  astra.max_context_window = 1050000;
-  models.push(astra);
+// GPT-6 家族（Astra / Sol / Luna，均为 1.05M 上下文）已官方发布，但本机 models_cache.json
+// 迟迟未收录（桌面端模型列表实时来自服务端、不落盘）。缓存收录之前，以同档 5.6 条目为模板、
+// 按官方模型页规格合成目录条目；缓存一旦收录，下方过滤会去重并由官方条目接管。
+// 规格来源：https://developers.openai.com/api/docs/models/gpt-6-sol （1.05M 上下文与档位）、
+// https://learn.chatgpt.com/docs/models （默认档位：Sol=medium、Luna=high、Astra=low；Luna 支持到 Max、不支持 Ultra）。
+const gpt6Specs = [
+  {
+    slug: "gpt-6-astra",
+    displayName: "GPT-6 Astra",
+    description: "Our most capable model, built for the hardest end-to-end work",
+    templateSlug: "gpt-5.6-sol",
+    defaultReasoningLevel: "low",
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+  },
+  {
+    slug: "gpt-6-sol",
+    displayName: "GPT-6 Sol",
+    description: "Built to power complex coding and agentic workflows",
+    templateSlug: "gpt-5.6-sol",
+    defaultReasoningLevel: "medium",
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+  },
+  {
+    slug: "gpt-6-luna",
+    displayName: "GPT-6 Luna",
+    description: "Our most efficient model for focused, high-volume tasks",
+    templateSlug: "gpt-5.6-luna",
+    defaultReasoningLevel: "high",
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+  },
+];
+const cacheSlugs = new Set(catalog.models.map((model) => model.slug));
+for (const spec of gpt6Specs) {
+  if (cacheSlugs.has(spec.slug)) continue;
+  const template = catalog.models.find((model) => model.slug === spec.templateSlug);
+  if (!template) throw new Error(`${spec.templateSlug} missing from cache; cannot synthesize ${spec.slug}`);
+  const gpt6Model = structuredClone(normalizeModel(template));
+  gpt6Model.slug = spec.slug;
+  gpt6Model.display_name = spec.displayName;
+  gpt6Model.description = spec.description;
+  gpt6Model.supported_reasoning_levels = (gpt6Model.supported_reasoning_levels || [])
+    .filter((level) => spec.supportedEfforts.includes(level.effort));
+  gpt6Model.default_reasoning_level = spec.defaultReasoningLevel;
+  gpt6Model.context_window = 1050000;
+  gpt6Model.max_context_window = 1050000;
+  models.push(gpt6Model);
 }
-// 去重兜底：缓存已收录 astra 时，上面不会再合成；此处防御未来重复。
+// 去重兜底：缓存已收录 GPT-6 条目时，上面不会再合成；此处防御未来重复。
 const seenSlugs = new Set();
 const dedupedModels = models.filter((model) => {
   if (seenSlugs.has(model.slug)) return false;
@@ -170,8 +213,33 @@ const missingFromCatalog = providers
 if (missingFromCatalog.length > 0) {
   throw new Error(`router config ${routerConfigPath} declares models missing from the catalog: ${missingFromCatalog.join(", ")}`);
 }
+// modelAliases 的目标必须是已知模型名（本地目录 slug 或官方 DeepSeek slug）。写错时
+// 上游会收到一个不存在的模型名并在远端报错，很难定位，所以在这里直接拦下。
+const knownSlugs = new Set([...models.map((model) => model.slug), ...deepSeekSlugs]);
+const unknownAliasTargets = providers
+  .flatMap((provider) => (provider.modelAliases && typeof provider.modelAliases === "object"
+    ? Object.values(provider.modelAliases)
+    : []))
+  .filter((target) => typeof target !== "string" || !knownSlugs.has(target));
+if (unknownAliasTargets.length > 0) {
+  throw new Error(`router config ${routerConfigPath} has unknown modelAliases targets: ${unknownAliasTargets.join(", ")}`);
+}
 
 await writeFile(outputPath, `${JSON.stringify({ models }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+
+// 与目录一起生成元信息（同样提交进仓库）：回答"这份模型列表是什么时候、按哪个官方版本抓的"。
+const metaPath = resolve(argument("--meta-output", join(dirname(outputPath), "models.meta.json")));
+const visibleModels = models.filter((model) => model.visibility === "list").map((model) => model.slug);
+await writeFile(metaPath, `${JSON.stringify({
+  generated_at: new Date().toISOString(),
+  official_fetched_at: typeof catalog.fetched_at === "string" ? catalog.fetched_at : null,
+  official_client_version: typeof catalog.client_version === "string" ? catalog.client_version : null,
+  multi_agent_version: multiAgentVersion,
+  model_count: models.length,
+  visible_models: visibleModels,
+}, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+
 process.stdout.write(
-  `Wrote ${models.length} models to ${outputPath} (multi_agent_version=${multiAgentVersion}, route check ok)\n`,
+  `Wrote ${models.length} models to ${outputPath} (multi_agent_version=${multiAgentVersion}, route check ok)\n`
+  + `Wrote catalog metadata to ${metaPath} (visible: ${visibleModels.join(", ")})\n`,
 );

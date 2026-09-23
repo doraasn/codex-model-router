@@ -466,6 +466,16 @@ export async function createRouterServer(overrides = {}) {
       // 前一个已改写时仍需运行），任一变换生效才重新序列化请求体。
       let requestBody = body;
       let transformed = false;
+      // provider 可用 modelAliases 把本地目录里的模型名映射回上游真实模型名：
+      // 本地目录把 deepseek-v4-pro 改名为 deepseek-pro，但 DeepSeek 只认官方 slug。
+      const upstreamModel = provider.modelAliases?.get?.(model);
+      if (upstreamModel && upstreamModel !== payload.model) {
+        payload.model = upstreamModel;
+        transformed = true;
+        process.stdout.write(
+          `${new Date().toISOString()} route=${provider.id} model=${model} upstream_model=${upstreamModel} alias=applied\n`,
+        );
+      }
       for (const name of provider.transforms) {
         const transform = PAYLOAD_TRANSFORMS.get(name);
         if (transform && transform(payload)) transformed = true;
@@ -505,6 +515,8 @@ export async function createRouterServer(overrides = {}) {
         ) {
           delete payload.prompt_cache_key;
           requestBody = Buffer.from(JSON.stringify(payload), "utf8");
+          // fetchOpts 仍指向旧 Buffer，不同步会让重试原样发出带 prompt_cache_key 的请求
+          fetchOpts.body = requestBody;
           process.stdout.write(
             `${new Date().toISOString()} route=${provider.id} model=${model} retry=without_prompt_cache_key\n`,
           );

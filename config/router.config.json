@@ -19,8 +19,11 @@
       "match": {
         "models": [
           "deepseek-flash",
-          "deepseek-v4-pro"
+          "deepseek-pro"
         ]
+      },
+      "modelAliases": {
+        "deepseek-pro": "deepseek-v4-pro"
       },
       "transforms": ["deepseek-effort", "deepseek-call-ids"]
     }

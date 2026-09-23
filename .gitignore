@@ -4,6 +4,5 @@ runtime/
 backups/
 *.log
 node_modules/
-config/models.json
 config/router.local.json
 temp/

@@ -27,7 +27,8 @@ function httpsBaseUrl(value, field, allowHttpLoopback = false) {
 }
 
 // Validate one provider entry and produce the runtime shape used by the server:
-// match.models becomes a Set, match.prefixes stays an array, transforms keep order.
+// match.models becomes a Set, match.prefixes stays an array, transforms keep order,
+// modelAliases becomes a Map (Codex 侧模型名 -> 上游真实模型名).
 function normalizeProvider(entry, index, allowHttpLoopback) {
   const field = `providers[${index}]`;
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
@@ -59,12 +60,25 @@ function normalizeProvider(entry, index, allowHttpLoopback) {
     ? entry.transforms.filter((t) => typeof t === "string" && t)
     : [];
 
+  const rawAliases = entry.modelAliases && typeof entry.modelAliases === "object" && !Array.isArray(entry.modelAliases)
+    ? entry.modelAliases
+    : {};
+  const modelAliases = new Map();
+  for (const [from, to] of Object.entries(rawAliases)) {
+    if (!from.trim()) throw new Error(`${field}.modelAliases must not contain an empty model name`);
+    if (typeof to !== "string" || !to.trim()) {
+      throw new Error(`${field}.modelAliases["${from}"] must be a non-empty string`);
+    }
+    modelAliases.set(from.trim(), to.trim());
+  }
+
   return {
     id,
     baseUrl,
     auth: { type: auth.type, envVar: auth.envVar },
     match: { models: new Set(models), prefixes },
     transforms,
+    modelAliases,
     retryOnPromptCacheError: entry.retryOnPromptCacheError === true,
   };
 }
