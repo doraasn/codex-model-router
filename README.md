@@ -1,4 +1,4 @@
-# Codex GPT + DeepSeek 本地模型路由器
+# Codex 多供应商本地模型路由器（GPT / DeepSeek / AstraHub）
 
 ## 文档定位
 

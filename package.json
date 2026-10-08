@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Loopback-only Responses API router for ChatGPT Codex and DeepSeek.",
+  "description": "Loopback-only Responses API router for ChatGPT Codex, DeepSeek and AstraHub.",
   "engines": {
     "node": ">=22.5"
   },

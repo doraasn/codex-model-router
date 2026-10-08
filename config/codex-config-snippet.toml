@@ -6,7 +6,7 @@ model_provider = "local_router"
 model_catalog_json = "<你的安装目录>/config/models.json"
 
 [model_providers.local_router]
-name = "GPT + DeepSeek"
+name = "GPT + DeepSeek + AstraHub"
 base_url = "http://127.0.0.1:4010/v1"
 wire_api = "responses"
 requires_openai_auth = true
