@@ -116,13 +116,15 @@ const astraHubModels = [
 }));
 
 const preferredOrder = new Map([
-  ["gpt-6-astra", 0],
-  ["gpt-6-sol", 1],
-  ["gpt-6-luna", 2],
-  ["gpt-5.6-sol", 3],
+  // 官方 2026-10-08 起把 gpt-6.1-sol 排在列表第一位，本地顺序跟随官方优先级
+  ["gpt-6.1-sol", 0],
+  ["gpt-6-astra", 1],
+  ["gpt-6-sol", 2],
+  ["gpt-6-luna", 3],
+  ["gpt-5.6-sol", 4],
   // DeepSeek 条目排在 GPT 之后，顺序跟随官方目录
-  ...deepSeekLocalSlugs.map((slug, index) => [slug, 4 + index]),
-  ...astraHubModels.map((model, index) => [model.slug, 4 + deepSeekLocalSlugs.length + index]),
+  ...deepSeekLocalSlugs.map((slug, index) => [slug, 5 + index]),
+  ...astraHubModels.map((model, index) => [model.slug, 5 + deepSeekLocalSlugs.length + index]),
 ]);
 
 const models = catalog.models

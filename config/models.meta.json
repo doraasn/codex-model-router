@@ -1,10 +1,11 @@
 {
-  "generated_at": "2026-10-08T06:04:05.062Z",
-  "official_fetched_at": "2026-09-23T01:52:22.466Z",
-  "official_client_version": "0.155.0-alpha.16",
+  "generated_at": "2026-10-08T09:31:46.187Z",
+  "official_fetched_at": "2026-10-08T09:30:33.117Z",
+  "official_client_version": "0.162.0-alpha.2",
   "multi_agent_version": "v1",
-  "model_count": 14,
+  "model_count": 15,
   "visible_models": [
+    "gpt-6.1-sol",
     "gpt-6-astra",
     "gpt-6-sol",
     "gpt-6-luna",
