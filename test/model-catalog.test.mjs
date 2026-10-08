@@ -63,6 +63,7 @@ function routerConfigPath(dir, name, models) {
     providers: [
       { id: "chatgpt", match: { prefixes: ["gpt-", "codex-"] } },
       { id: "deepseek", match: { models } },
+      { id: "astrahub", match: { models: ["as-kimi-k3", "as-deepseek-v4.1-flash", "as-glm-5.2"] } },
     ],
   }), "utf8");
   return path;
@@ -90,22 +91,24 @@ test("generates the catalog from the official DeepSeek baseline and passes the r
     assert.ok(generatedSlugs.includes(slug), `catalog is missing ${slug}`);
   }
   // GPT 侧仍按缓存保留、隐藏旧模型，并合成 GPT-6 家族
-  // 5.6 全系与 5.5/5.4 只保留路由、不在模型列表显示（GPT-6 已取代它们）
-  for (const slug of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"]) {
+  // 5.6 Terra/Luna 与 5.5/5.4 只保留路由、不在模型列表显示（已被 GPT-6 取代）
+  for (const slug of ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"]) {
     assert.equal(generated.find((model) => model.slug === slug).visibility, "hide", `${slug} 应隐藏`);
   }
+  // 5.6 Sol 保持显示，可与更便宜的 6 Sol 并存
+  assert.equal(generated.find((model) => model.slug === "gpt-5.6-sol").visibility, "list");
   for (const slug of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
     assert.ok(generatedSlugs.includes(slug), `catalog is missing ${slug}`);
   }
-  // 可见条目顺序：GPT-6 三个条目在前，随后是 DeepSeek，隐藏条目排在最后
-  assert.deepEqual(generatedSlugs.slice(0, 3), ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]);
-  assert.deepEqual(generatedSlugs.slice(3, 3 + localDeepSeekSlugs().length), localDeepSeekSlugs());
+  // 可见条目顺序：GPT-6 三个条目 → 5.6 Sol → DeepSeek，隐藏条目排在最后
+  assert.deepEqual(generatedSlugs.slice(0, 4), ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol"]);
+  assert.deepEqual(generatedSlugs.slice(4, 4 + localDeepSeekSlugs().length), localDeepSeekSlugs());
   assert.equal(generated.at(-1).visibility, "hide");
   // 生成结果旁边的元信息文件：条数、官方抓取时间与可见模型清单
   const meta = JSON.parse(readFileSync(join(dir, "models.meta.json"), "utf8"));
   assert.equal(meta.model_count, generated.length);
   assert.equal(meta.official_fetched_at, "2026-01-01T00:00:00Z");
-  assert.deepEqual(meta.visible_models, ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "deepseek-flash"]);
+  assert.deepEqual(meta.visible_models, ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "deepseek-flash", "as-kimi-k3", "as-deepseek-v4.1-flash", "as-glm-5.2"]);
   assert.equal(typeof meta.generated_at, "string");
   // 合成条目按官方规格：1.05M 上下文、默认档位、档位上界与 Fast 费率说明
   const astra = generated.find((model) => model.slug === "gpt-6-astra");
@@ -133,6 +136,19 @@ test("generates the catalog from the official DeepSeek baseline and passes the r
   assert.equal(pro.visibility, "hide");
   assert.equal(pro.context_window, 1048576);
   assert.equal(generated.some((model) => model.slug === "deepseek-v4-pro"), false);
+  for (const [slug, displayName, expectsImage] of [
+    ["as-kimi-k3", "AS-kimi-k3", true],
+    ["as-deepseek-v4.1-flash", "AS-deepseek-v4.1-flash", true],
+    ["as-glm-5.2", "AS-GLM-5.2", false],
+  ]) {
+    const model = generated.find((entry) => entry.slug === slug);
+    assert.equal(model.display_name, displayName);
+    assert.equal(model.visibility, "list");
+    assert.equal(model.context_window, 1000000);
+    assert.equal(model.max_context_window, 1000000);
+    assert.deepEqual(model.input_modalities, expectsImage ? ["text", "image"] : ["text"]);
+    assert.equal(model.supports_image_detail_original, expectsImage);
+  }
 });
 
 test("prefers the official cache entry once the cache lists GPT-6 models", () => {
@@ -151,9 +167,9 @@ test("prefers the official cache entry once the cache lists GPT-6 models", () =>
   assert.equal(slugs.filter((slug) => slug === "gpt-6-sol").length, 1);
   assert.equal(slugs.filter((slug) => slug === "gpt-6-luna").length, 1);
   assert.equal(generated.find((model) => model.slug === "gpt-6-sol").context_window, undefined);
-  // 缓存未收录的 gpt-6-astra 仍走合成，且 5.6 Sol 依旧隐藏
+  // 缓存未收录的 gpt-6-astra 仍走合成，5.6 Sol 保持显示
   assert.ok(slugs.includes("gpt-6-astra"));
-  assert.equal(generated.find((model) => model.slug === "gpt-5.6-sol").visibility, "hide");
+  assert.equal(generated.find((model) => model.slug === "gpt-5.6-sol").visibility, "list");
 });
 
 test("fails when the router cannot route a generated model", () => {

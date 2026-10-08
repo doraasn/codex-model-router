@@ -16,6 +16,7 @@ param(
     [string]$ConfigPath = '',
     [string]$BackupDirectory = '',
     [string]$SecretPath = (Join-Path $PSScriptRoot 'secrets\deepseek-key.txt'),
+    [string]$AstraHubSecretPath = (Join-Path $PSScriptRoot 'secrets\astrahub-key.txt'),
     [ValidateSet('v1', 'v2')][string]$MultiAgent = 'v1',
     [string]$TargetDirectory = 'C:\Projects\codex-model-router',
     [switch]$DryRun,
@@ -83,10 +84,19 @@ function Invoke-RouterServe {
     $nodeCommand = Get-NodeCommand
     try {
         $env:DEEPSEEK_API_KEY = $plainKey
+        if (Test-Path -LiteralPath $AstraHubSecretPath) {
+            $astraHubKey = [IO.File]::ReadAllText($AstraHubSecretPath, [Text.Encoding]::UTF8).Trim()
+            if ([string]::IsNullOrWhiteSpace($astraHubKey)) {
+                throw "AstraHub Key 文件为空：$AstraHubSecretPath"
+            }
+            $env:ASTRAHUB_API_KEY = $astraHubKey
+        }
         & $nodeCommand.Source (Join-Path $ProjectDirectory 'src\server.mjs')
     } finally {
         Remove-Item Env:DEEPSEEK_API_KEY -ErrorAction SilentlyContinue
+        Remove-Item Env:ASTRAHUB_API_KEY -ErrorAction SilentlyContinue
         $plainKey = $null
+        $astraHubKey = $null
     }
 }
 

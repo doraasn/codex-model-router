@@ -9,7 +9,7 @@
 ## 架构
 
 - 路由器仅监听 `127.0.0.1:4010`，只接受 `POST /v1/responses`、`POST /responses` 与 `GET /healthz`。
-- 按 `config/router.config.json` 的 `providers` 列表路由：请求体 `model` 先精确匹配 `match.models`，再按 `match.prefixes` 前缀匹配，命中哪个 provider 就转发到哪个 `baseUrl`。内置两个 provider：`chatgpt`（沿用 `%USERPROFILE%\.codex\auth.json` 登录态）与 `deepseek`（凭据来自环境变量 `DEEPSEEK_API_KEY`）。
+- 按 `config/router.config.json` 的 `providers` 列表路由：请求体 `model` 先精确匹配 `match.models`，再按 `match.prefixes` 前缀匹配，命中哪个 provider 就转发到哪个 `baseUrl`。内置三个 provider：`chatgpt`（沿用 `%USERPROFILE%\.codex\auth.json` 登录态）、`deepseek`（凭据来自环境变量 `DEEPSEEK_API_KEY`）与 `astrahub`（凭据来自环境变量 `ASTRAHUB_API_KEY`）。
 - 每个 provider 通过 `transforms` 数组按序挂载请求清洗（见 `src/server.mjs` 的 `PAYLOAD_TRANSFORMS` 注册表）：
   - `chatgpt-history`：第三方历史条目 id 规范化到官方类型前缀（`msg_`/`rs_`/`fc_`/`fco_`/`ctc_`/`ctco_`/`ws_`）；`reasoning.content` 迁移到 `summary` 并清空 `content`；递归删除旧参数 `prompt_cache_retention`。
   - `deepseek-effort`：中/高/极高映射为官方 `low/high/max`；删除 `service_tier`/`serviceTier`。
@@ -109,9 +109,9 @@ node .\scripts\build-model-catalog.mjs            # 默认 --multi-agent v1
 node .\scripts\build-model-catalog.mjs --multi-agent v2   # 恢复上游原值（v2/上游 pin）
 ```
 
-读取 `%USERPROFILE%\.codex\models_cache.json`，保留 GPT 模型并加入 DeepSeek 官方条目，输出 `config\models.json` 与 `config\models.meta.json`（两者都已提交进仓库，克隆后可直接使用；缓存不存在时先执行 `npm run fetch:catalog` 拉取）。可见列表：GPT-6 Astra、GPT-6 Sol、GPT-6 Luna，之后是 DeepSeek 条目（按官方目录顺序），其余为 `hide`。显示名、档位、上下文等一律以官方条目为准；只有 `hiddenCompatibilityModels` 与 DeepSeek `localOverrides` 会改写可见性。注意：官方缓存里没有的 GPT-6 条目会以同档 5.6 条目为模板合成兜底（1.05M 上下文；Astra=`low`、Sol=`medium`、Luna=`high`），一旦缓存收录官方条目就自动改用官方值（官方 `context_window` 为 272000、`max_context_window` 为 872000）。
+读取 `%USERPROFILE%\.codex\models_cache.json`，保留 GPT 模型并加入 DeepSeek 官方条目，输出 `config\models.json` 与 `config\models.meta.json`（两者都已提交进仓库，克隆后可直接使用；缓存不存在时先执行 `npm run fetch:catalog` 拉取）。可见列表：GPT-6 Astra、GPT-6 Sol、GPT-6 Luna、GPT-5.6 Sol，之后是 DeepSeek 条目（按官方目录顺序），其余为 `hide`。显示名、档位、上下文等一律以官方条目为准；只有 `hiddenCompatibilityModels` 与 DeepSeek `localOverrides` 会改写可见性。注意：官方缓存里没有的 GPT-6 条目会以同档 5.6 条目为模板合成兜底（1.05M 上下文；Astra=`low`、Sol=`medium`、Luna=`high`），一旦缓存收录官方条目就自动改用官方值（官方 `context_window` 为 272000、`max_context_window` 为 872000）。
 
-`hiddenCompatibilityModels` 里的模型只在列表隐藏、仍可正常路由：`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`（官方 2026-10-14 从 Codex 退市）、`gpt-5.4`、`gpt-5.4-mini`，外加官方本身就标 `hide` 的 `gpt-reserve`、`codex-auto-review`。隐藏 5.6 Sol 的依据是官方两套计费口径下 GPT-6 Sol 都正好是它的一半，能力不降：Codex 额度按每 1M tokens 计，GPT-6 Sol 为 50/5/250 credits（输入/缓存输入/输出），GPT-5.6 Sol 为 100/10/500 credits；API 标准档单价 gpt-6-sol 为 $2/$0.2/$10，gpt-5.6-sol 为 $4/$0.4/$20。来源：[Codex 定价](https://learn.chatgpt.com/docs/pricing)、[OpenAI API 定价](https://developers.openai.com/api/docs/pricing)。
+`hiddenCompatibilityModels` 里的模型只在列表隐藏、仍可正常路由：`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`（官方 2026-10-14 从 Codex 退市）、`gpt-5.4`、`gpt-5.4-mini`，外加官方本身就标 `hide` 的 `gpt-reserve`、`codex-auto-review`。`gpt-5.6-sol` 保持显示，与 GPT-6 Sol 并存——两者同档，GPT-6 Sol 在官方两套计费口径下都只有它的一半（Codex 额度按每 1M tokens 计：GPT-6 Sol 50/5/250 credits，GPT-5.6 Sol 100/10/500 credits；API 标准档单价：gpt-6-sol $2/$0.2/$10，gpt-5.6-sol $4/$0.4/$20，来源：[Codex 定价](https://learn.chatgpt.com/docs/pricing)、[OpenAI API 定价](https://developers.openai.com/api/docs/pricing)），但账号侧对 GPT-6 Sol 的访问不一定开通（实测可能返回 404 `model_not_found`），所以两个都留着方便切换。
 
 DeepSeek 条目默认沿用官方 slug/显示名，只有 `localOverrides` 里显式列出的会改名或隐藏。当前覆盖：官方 `deepseek-v4-pro` → 面向 Codex 的 `deepseek-pro`（显示名 `DeepSeek-Pro`，`visibility: hide` 暂时隐藏）。**改名必须在 `config/router.config.json` 的 `modelAliases` 里把新 slug 映射回官方 slug**（如 `"deepseek-pro": "deepseek-v4-pro"`），否则上游会收到 DeepSeek 不认识的模型名；生成脚本会校验 `modelAliases` 的目标是否为已知模型名，写错直接报错。
 
@@ -128,6 +128,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action 
 ```
 
 Key 明文保存在 `secrets\deepseek-key.txt`（对应环境变量 `DEEPSEEK_API_KEY`，Git 忽略），换机器直接复制该文件。修改后需重启路由器生效。
+
+AstraHub Key 保存为 `secrets\astrahub-key.txt`（对应 `ASTRAHUB_API_KEY`，Git 忽略）。本地目录中的 `AS-kimi-k3`、`AS-deepseek-v4.1-flash`、`AS-GLM-5.2` 分别映射到 AstraHub 的原始模型名；更新 Key 后需重新启动路由器。
 
 ### 3. 启动路由器
 

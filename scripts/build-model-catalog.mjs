@@ -37,9 +37,8 @@ if (officialDeepSeekModels.length === 0) {
 const deepSeekSlugs = officialDeepSeekModels.map((model) => model.slug);
 const hiddenCompatibilityModels = new Set([
   "codex-auto-review",
-  // GPT-6 Sol 官方单价（Codex 额度与 API）都是 GPT-5.6 Sol 的一半，能力不降，列表只保留 6 Sol。
-  "gpt-5.6-sol",
-  // 5.6 全系与 5.5 已被 GPT-6 取代（5.5 官方 2026-10-14 从 Codex 退市），本地不再显示。
+  // 5.6 Terra/Luna 与 5.5 已被 GPT-6 取代（5.5 官方 2026-10-14 从 Codex 退市），本地不再显示；
+  // 5.6 Sol 保留显示（GPT-6 Sol 与它同档且更便宜，但账号侧不一定可用，两个都留着方便切换）。
   "gpt-5.6-terra",
   "gpt-5.6-luna",
   "gpt-5.5",
@@ -93,12 +92,37 @@ const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
   return model;
 });
 
+// AstraHub 使用独立的本地 slug，避免与已有 DeepSeek 模型冲突；
+// 仅复用现有 Codex 目录条目的代理能力，实际型号由路由别名映射。
+// 图像能力按 AstraHub /v1/responses 实测填写：kimi-k3、deepseek-v4.1-flash
+// 能正确识别图片内容；GLM-5.2 对图片返回错误答案，按纯文本模型处理。
+const astraHubModels = [
+  ["as-kimi-k3", "AS-kimi-k3", "kimi-k3", true],
+  ["as-deepseek-v4.1-flash", "AS-deepseek-v4.1-flash", "deepseek-v4.1-flash", true],
+  ["as-glm-5.2", "AS-GLM-5.2", "GLM-5.2", false],
+].map(([slug, displayName, upstreamModel, supportsImage]) => ({
+  ...structuredClone(deepSeekModels[1]),
+  slug,
+  display_name: displayName,
+  description: `AstraHub ${upstreamModel}`,
+  // 三个上游模型均公开标称 1M 上下文；AstraHub 未在 /v1/models 返回单独限额。
+  context_window: 1000000,
+  max_context_window: 1000000,
+  input_modalities: supportsImage ? ["text", "image"] : ["text"],
+  supports_image_detail_original: supportsImage,
+  default_reasoning_level: "medium",
+  supported_reasoning_levels: [{ effort: "medium", description: "Standard reasoning" }],
+  visibility: "list",
+}));
+
 const preferredOrder = new Map([
   ["gpt-6-astra", 0],
   ["gpt-6-sol", 1],
   ["gpt-6-luna", 2],
+  ["gpt-5.6-sol", 3],
   // DeepSeek 条目排在 GPT 之后，顺序跟随官方目录
-  ...deepSeekLocalSlugs.map((slug, index) => [slug, 3 + index]),
+  ...deepSeekLocalSlugs.map((slug, index) => [slug, 4 + index]),
+  ...astraHubModels.map((model, index) => [model.slug, 4 + deepSeekLocalSlugs.length + index]),
 ]);
 
 const models = catalog.models
@@ -108,6 +132,7 @@ const models = catalog.models
     ? { ...model, visibility: "hide" }
     : model);
 models.push(...deepSeekModels);
+models.push(...astraHubModels);
 
 // GPT-6 家族（Astra / Sol / Luna，均为 1.05M 上下文）已官方发布，但本机 models_cache.json
 // 迟迟未收录（桌面端模型列表实时来自服务端、不落盘）。缓存收录之前，以同档 5.6 条目为模板、
@@ -215,7 +240,11 @@ if (missingFromCatalog.length > 0) {
 }
 // modelAliases 的目标必须是已知模型名（本地目录 slug 或官方 DeepSeek slug）。写错时
 // 上游会收到一个不存在的模型名并在远端报错，很难定位，所以在这里直接拦下。
-const knownSlugs = new Set([...models.map((model) => model.slug), ...deepSeekSlugs]);
+const knownSlugs = new Set([
+  ...models.map((model) => model.slug),
+  ...deepSeekSlugs,
+  "kimi-k3", "deepseek-v4.1-flash", "GLM-5.2",
+]);
 const unknownAliasTargets = providers
   .flatMap((provider) => (provider.modelAliases && typeof provider.modelAliases === "object"
     ? Object.values(provider.modelAliases)
