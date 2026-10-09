@@ -15,8 +15,6 @@ param(
     [string]$CodexHome = (Join-Path $env:USERPROFILE '.codex'),
     [string]$ConfigPath = '',
     [string]$BackupDirectory = '',
-    [string]$SecretPath = (Join-Path $PSScriptRoot 'secrets\deepseek-key.txt'),
-    [string]$AstraHubSecretPath = (Join-Path $PSScriptRoot 'secrets\astrahub-key.txt'),
     [ValidateSet('v1', 'v2')][string]$MultiAgent = 'v1',
     [string]$TargetDirectory = 'C:\Projects\codex-model-router',
     [switch]$DryRun,
@@ -32,6 +30,24 @@ $AutostartEntry = 'CodexModelRouter'
 
 function Get-NodeCommand {
     Get-Command node.exe -ErrorAction Stop
+}
+
+# 读取 router.config.json 里声明的 providers（Key 流程与启动注入共用）。
+function Get-RouterProviders {
+    $configPath = Join-Path $ProjectDirectory 'config\router.config.json'
+    if (-not (Test-Path -LiteralPath $configPath)) { return @() }
+    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    return @($config.providers)
+}
+
+# 需要 API Key 的供应商（auth.type = env）。
+function Get-EnvProviders {
+    return @(Get-RouterProviders | Where-Object { $_.auth -and $_.auth.type -eq 'env' })
+}
+
+# Key 文件命名规则：secrets\<provider id>-key.txt，换机器直接复制该目录。
+function Get-ProviderSecretPath([string]$ProviderId) {
+    return (Join-Path $ProjectDirectory ("secrets\{0}-key.txt" -f $ProviderId))
 }
 
 function Invoke-RouterStop {
@@ -74,29 +90,36 @@ function Invoke-RouterStop {
 
 # Foreground serve; used directly by the background launcher (-Action serve).
 function Invoke-RouterServe {
-    if (-not (Test-Path -LiteralPath $SecretPath)) {
-        throw "未找到 DeepSeek Key 文件：$SecretPath。请先执行动作 set-key。"
-    }
-    $plainKey = [IO.File]::ReadAllText($SecretPath, [Text.Encoding]::UTF8).Trim()
-    if ([string]::IsNullOrWhiteSpace($plainKey)) {
-        throw "DeepSeek Key 文件为空：$SecretPath"
-    }
     $nodeCommand = Get-NodeCommand
-    try {
-        $env:DEEPSEEK_API_KEY = $plainKey
-        if (Test-Path -LiteralPath $AstraHubSecretPath) {
-            $astraHubKey = [IO.File]::ReadAllText($AstraHubSecretPath, [Text.Encoding]::UTF8).Trim()
-            if ([string]::IsNullOrWhiteSpace($astraHubKey)) {
-                throw "AstraHub Key 文件为空：$AstraHubSecretPath"
-            }
-            $env:ASTRAHUB_API_KEY = $astraHubKey
+    # 按配置逐个注入 Key：provider.auth.envVar <- secrets\<provider.id>-key.txt
+    $envProviders = Get-EnvProviders
+    $loaded = @()
+    $missing = @()
+    foreach ($provider in $envProviders) {
+        $secretPath = Get-ProviderSecretPath $provider.id
+        if (-not (Test-Path -LiteralPath $secretPath)) {
+            $missing += "$($provider.id)（缺少 $secretPath）"
+            continue
         }
+        $plainKey = [IO.File]::ReadAllText($secretPath, [Text.Encoding]::UTF8).Trim()
+        if ([string]::IsNullOrWhiteSpace($plainKey)) {
+            $missing += "$($provider.id)（$secretPath 为空）"
+            continue
+        }
+        Set-Item -Path ("Env:{0}" -f $provider.auth.envVar) -Value $plainKey
+        $loaded += "$($provider.id) -> $($provider.auth.envVar)"
+        $plainKey = $null
+    }
+    if ($loaded.Count -gt 0) { Write-Host ("已加载 Key：" + ($loaded -join '，')) }
+    if ($missing.Count -gt 0) {
+        Write-Host ("未配置 Key（对应供应商请求会返回 503）：" + ($missing -join '，')) -ForegroundColor Yellow
+    }
+    try {
         & $nodeCommand.Source (Join-Path $ProjectDirectory 'src\server.mjs')
     } finally {
-        Remove-Item Env:DEEPSEEK_API_KEY -ErrorAction SilentlyContinue
-        Remove-Item Env:ASTRAHUB_API_KEY -ErrorAction SilentlyContinue
-        $plainKey = $null
-        $astraHubKey = $null
+        foreach ($provider in $envProviders) {
+            Remove-Item ("Env:{0}" -f $provider.auth.envVar) -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -168,21 +191,22 @@ function Invoke-RouterStartBackground {
     Write-Host "路由器已启动。launcher_pid=$($process.Id) node_pid=$($listener.OwningProcess)"
 }
 
-# 设置 API Key：查看手动配置说明，或选择供应商录入（当前仅支持 deepseek）。
+# 设置 API Key：列出配置里需要 Key 的供应商，支持自定义供应商。
 function Show-ApiKeyManualGuide {
     Write-Host ''
-    Write-Host 'Key 明文保存在以下文件（一行即可，UTF-8 编码）：'
-    Write-Host "  $SecretPath"
-    Write-Host '路由启动时读取该文件并注入环境变量 DEEPSEEK_API_KEY；修改后需重启路由器（菜单 1）生效。'
-    Write-Host '该文件已被 Git 忽略，换机器直接复制。对应 config\router.config.json 的 provider 配置示例：'
+    Write-Host 'Key 明文保存在 secrets\<供应商 id>-key.txt（一行即可，UTF-8 编码）。'
+    Write-Host '路由器启动时按 config\router.config.json 中各 provider 的 auth.envVar 注入环境变量，'
+    Write-Host '例如 deepseek -> secrets\deepseek-key.txt -> DEEPSEEK_API_KEY。'
+    Write-Host '该目录已被 Git 忽略，换机器直接复制；修改 Key 后需重启路由器（菜单 1）生效。'
+    Write-Host ''
+    Write-Host '新增供应商：在 config\router.config.json 的 providers 追加条目，片段示例：'
     Write-Host ''
     Write-Host @'
 {
-  "id": "deepseek",
-  "baseUrl": "https://api.deepseek.com/",
-  "auth": { "type": "env", "envVar": "DEEPSEEK_API_KEY" },
-  "match": { "models": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] },
-  "transforms": ["deepseek-effort", "deepseek-call-ids"]
+  "id": "myprovider",
+  "baseUrl": "https://api.example.com/v1/",
+  "auth": { "type": "env", "envVar": "MYPROVIDER_API_KEY" },
+  "match": { "models": ["my-model"] }
 }
 '@
     Write-Host ''
@@ -193,26 +217,42 @@ function Invoke-SetApiKeyFlow {
     Write-Host '=============================================='
     Write-Host ' 设置 API Key'
     Write-Host '=============================================='
-    Write-Host ' 1) 查看手动配置说明（文件位置与配置示例）'
-    Write-Host ' 2) 选择供应商并录入 API Key'
+    $envProviders = Get-EnvProviders
+    $providerByChoice = @{}
+    $index = 0
+    foreach ($provider in $envProviders) {
+        $index++
+        $providerByChoice["$index"] = $provider
+        $secretPath = Get-ProviderSecretPath $provider.id
+        $state = if (Test-Path -LiteralPath $secretPath) { '已配置' } else { '未配置' }
+        Write-Host (" {0}) {1,-10} [{2}]  环境变量 {3}" -f $index, $provider.id, $state, $provider.auth.envVar)
+    }
+    if ($index -eq 0) {
+        Write-Host ' （config\router.config.json 中没有声明 auth.type = env 的供应商）'
+    }
+    Write-Host ' c) 自定义供应商'
+    Write-Host ' h) 手动配置说明（Key 文件位置与 provider 片段）'
     Write-Host ' 0) 返回主菜单'
     Write-Host ''
     $choice = Read-Host '请输入选项'
-    if ([string]::IsNullOrEmpty($choice)) { return }
-    switch ($choice) {
-        '1' { Show-ApiKeyManualGuide }
-        '2' {
-            $provider = Read-Host '供应商（当前支持：deepseek）[deepseek]'
-            if (-not $provider) { $provider = 'deepseek' }
-            if ($provider -ne 'deepseek') {
-                Write-Host "暂不支持供应商 $provider。新增供应商需先在 config\router.config.json 的 providers 中声明。"
-                return
-            }
-            Save-DeepSeekKey
+    if ([string]::IsNullOrEmpty($choice) -or $choice -eq '0') { return }
+    if ($choice -eq 'h') { Show-ApiKeyManualGuide; return }
+    if ($choice -eq 'c') {
+        $providerId = Read-Host '供应商 id（需与 router.config.json 里 provider.id 一致）'
+        if ([string]::IsNullOrWhiteSpace($providerId)) { throw '未输入供应商 id。' }
+        $providerId = $providerId.Trim()
+        $defaultEnvVar = (($providerId -replace '[^0-9A-Za-z]', '_').ToUpper()) + '_API_KEY'
+        $envVar = Read-Host "环境变量名（需与 provider.auth.envVar 一致）[$defaultEnvVar]"
+        if ([string]::IsNullOrWhiteSpace($envVar)) { $envVar = $defaultEnvVar }
+        if (-not ($envProviders | Where-Object { $_.id -eq $providerId })) {
+            Write-Host "提示：$providerId 还没有在 config\router.config.json 中声明，补上 provider 条目后 Key 才会被加载（可先看 h 的片段）。" -ForegroundColor Yellow
         }
-        '0' { return }
-        default { Write-Host '无效选项。' }
+        Save-ProviderKey $providerId $envVar.Trim()
+        return
     }
+    if (-not $providerByChoice.ContainsKey($choice)) { Write-Host '无效选项。'; return }
+    $selected = $providerByChoice[$choice]
+    Save-ProviderKey $selected.id $selected.auth.envVar
 }
 
 function Invoke-RouterRestart {
@@ -234,16 +274,23 @@ function Invoke-RouterHealth {
     Write-Host '路由器健康检查通过。'
 }
 
-function Save-DeepSeekKey {
-    $secretDirectory = Split-Path -Parent $SecretPath
-    New-Item -ItemType Directory -Path $secretDirectory -Force | Out-Null
-    $plainKey = Read-Host '请输入新的 DeepSeek API Key'
+# 保存 Key 到 secrets\<供应商 id>-key.txt（明文，与现有约定一致）。
+function Save-ProviderKey([string]$ProviderId, [string]$EnvVar) {
+    $secretPath = Get-ProviderSecretPath $ProviderId
+    New-Item -ItemType Directory -Path (Split-Path -Parent $secretPath) -Force | Out-Null
+    $plainKey = Read-Host "请输入 $ProviderId 的 API Key"
     if ([string]::IsNullOrWhiteSpace($plainKey)) {
         throw '未输入任何 Key。'
     }
-    [IO.File]::WriteAllText($SecretPath, $plainKey.Trim(), [Text.UTF8Encoding]::new($false))
-    Write-Host "Key 已明文保存：$SecretPath"
-    Write-Host '请保管好该文件；secrets\ 目录已被 Git 忽略。'
+    [IO.File]::WriteAllText($secretPath, $plainKey.Trim(), [Text.UTF8Encoding]::new($false))
+    Write-Host "Key 已明文保存：$secretPath"
+    Write-Host "对应环境变量：$EnvVar（路由器启动时注入）"
+    Write-Host '请保管好该文件；secrets\ 目录已被 Git 忽略。修改后需重启路由器（菜单 1）生效。'
+}
+
+# 兼容命令行动作 -Action set-key：直接录入 DeepSeek Key。
+function Save-DeepSeekKey {
+    Save-ProviderKey 'deepseek' 'DEEPSEEK_API_KEY'
 }
 
 function Build-ModelCatalog([string]$Version) {

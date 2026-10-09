@@ -86,7 +86,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1
 | `restart` | 停止旧实例并后台启动（`start-router.bat` 即此动作） | 1 |
 | `start` / `stop` | 启动 / 停止 | 1 / 2 |
 | `health` | 健康检查 | 3 |
-| `set-key` | 设置供应商 API Key（当前支持 deepseek；含手动配置说明，明文存 `secrets\deepseek-key.txt`） | 4 |
+| `set-key` | 直接录入 DeepSeek Key（菜单里可选任意已声明供应商，或用 `c` 录入自定义供应商） | 4 |
 | `build-catalog` | 生成模型目录，`-MultiAgent v1|v2` 控制协作面（默认 v1） | 5 → 2 |
 | `setup-codex` | 备份并合并 Codex 配置（`-DryRun` 预览、`-Force` 重应用） | 5 → 3 |
 | `migrate-sessions` | 会话标签 `openai → local_router` | 6 → 1 |
@@ -119,17 +119,24 @@ DeepSeek 条目默认沿用官方 slug/显示名，只有 `localOverrides` 里�
 
 见上文「模型列表（已随仓库提供）」一节：`npm run fetch:catalog` → `npm run build:catalog`，最后完全重启 Codex。也可以走桌面端手动刷新：完全退出 Codex → 临时移除 `config.toml` 的 `model_catalog_json` 一行 → 打开 Codex 等其联网刷新后再退出并恢复该行。
 
-### 2. 设置 DeepSeek Key（明文）
+### 2. 设置供应商 API Key（明文）
 
-菜单 `4`（设置 API Key）：选 `1` 查看手动配置说明（文件位置与 provider 配置示例），或选 `2` 选择供应商 `deepseek` 交互录入。命令行等价：
+菜单 `4`（设置 API Key）会读取 `config\router.config.json`，列出所有 `auth.type = env` 的供应商并标注是否已配置，按编号录入；`c` 进入自定义供应商（输入 provider id 与环境变量名），`h` 查看手动配置说明。
+
+Key 统一保存为 `secrets\<provider id>-key.txt`（Git 忽略），路由器启动时按配置里的 `auth.envVar` 自动注入：
+
+| 供应商 | Key 文件 | 环境变量 |
+|---|---|---|
+| `deepseek` | `secrets\deepseek-key.txt` | `DEEPSEEK_API_KEY` |
+| `astrahub` | `secrets\astrahub-key.txt` | `ASTRAHUB_API_KEY` |
+
+修改 Key 后需重启路由器生效。命令行等价（直接录入 DeepSeek Key）：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action set-key
 ```
 
-Key 明文保存在 `secrets\deepseek-key.txt`（对应环境变量 `DEEPSEEK_API_KEY`，Git 忽略），换机器直接复制该文件。修改后需重启路由器生效。
-
-AstraHub Key 保存为 `secrets\astrahub-key.txt`（对应 `ASTRAHUB_API_KEY`，Git 忽略）。本地目录中的 `AS-kimi-k3`、`AS-deepseek-v4.1-flash`、`AS-GLM-5.2` 分别映射到 AstraHub 的原始模型名；更新 Key 后需重新启动路由器。
+换机器直接复制整个 `secrets\` 目录即可。本地目录中的 `AS-kimi-k3`、`AS-deepseek-v4.1-flash`、`AS-GLM-5.2` 分别映射到 AstraHub 的原始模型名。
 
 ### 3. 启动路由器
 
@@ -211,6 +218,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action 
 ## 新增模型供应商
 
 1. 编辑 `config/router.config.json`，在 `providers` 追加条目：`id`、`baseUrl`（必须 HTTPS）、`auth`（`chatgpt` 透传登录态，或 `env` + `envVar` 从环境变量取 Key）、`match`（`models` 精确列表或 `prefixes` 前缀）、可选 `transforms`。
+   `env` 类型用菜单 `4` 的 `c) 自定义供应商` 录入 Key（存 `secrets\<id>-key.txt`），路由器启动时按 `envVar` 自动注入，不需要改脚本。
 2. 上游兼容 Responses API 时无需新代码；需要兼容清洗时在 `src/server.mjs` 的 `PAYLOAD_TRANSFORMS` 注册表加一个纯函数，再在 provider 的 `transforms` 里按序引用。
 3. 若新模型要出现在 Codex 模型列表，参照 `scripts/build-model-catalog.mjs` 的 DeepSeek 处理方式扩展目录生成。
 4. 重启路由器（`start-router.bat`）生效。
