@@ -84,14 +84,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1
 | `-Action` | 作用 | 等价菜单项 |
 |---|---|---|
 | `restart` | 停止旧实例并后台启动（`start-router.bat` 即此动作） | 1 |
-| `start` / `stop` | 后台启动 / 停止 | 2 / 3 |
-| `health` | 健康检查 | 4 |
-| `set-key` | 设置供应商 API Key（当前支持 deepseek；含手动配置说明，明文存 `secrets\deepseek-key.txt`） | 5 |
-| `build-catalog` | 生成模型目录，`-MultiAgent v1|v2` 控制协作面（默认 v1） | 6（前半） |
-| `setup-codex` | 备份并合并 Codex 配置（`-DryRun` 预览、`-Force` 重应用） | 6（后半），无独立菜单项 |
-| `migrate-sessions` | 会话标签 `openai → local_router` | 7 |
-| `restore-official` | 恢复 Codex 官方配置并迁回会话标签 | 10 |
-| `enable-autostart` / `disable-autostart` | 登录自启动开关 | 8 / 9 |
+| `start` / `stop` | 启动 / 停止 | 1 / 2 |
+| `health` | 健康检查 | 3 |
+| `set-key` | 设置供应商 API Key（当前支持 deepseek；含手动配置说明，明文存 `secrets\deepseek-key.txt`） | 4 |
+| `build-catalog` | 生成模型目录，`-MultiAgent v1|v2` 控制协作面（默认 v1） | 5 → 2 |
+| `setup-codex` | 备份并合并 Codex 配置（`-DryRun` 预览、`-Force` 重应用） | 5 → 3 |
+| `migrate-sessions` | 会话标签 `openai → local_router` | 6 → 1 |
+| `restore-official` | 恢复 Codex 官方配置并迁回会话标签 | 5 → 4 |
+| `enable-autostart` / `disable-autostart` | 登录自启动开关 | 6 → 2（按当前状态切换） |
 | `install` | 复制项目到 `-TargetDirectory`（排除密钥/日志/git），并生成目录 | 无菜单项，仅命令 |
 
 通用参数：`-CodexHome`、`-ConfigPath`、`-BackupDirectory`、`-DryRun`、`-Force`、`-SkipSessionMigration`。
@@ -121,7 +121,7 @@ DeepSeek 条目默认沿用官方 slug/显示名，只有 `localOverrides` 里�
 
 ### 2. 设置 DeepSeek Key（明文）
 
-菜单 `5`（设置 API Key）：选 `1` 查看手动配置说明（文件位置与 provider 配置示例），或选 `2` 选择供应商 `deepseek` 交互录入。命令行等价：
+菜单 `4`（设置 API Key）：选 `1` 查看手动配置说明（文件位置与 provider 配置示例），或选 `2` 选择供应商 `deepseek` 交互录入。命令行等价：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action set-key
@@ -143,7 +143,7 @@ npm run start:bg
 
 ### 4. 配置 Codex
 
-菜单 `6`（重新生成配置）会一并完成模型目录生成与 Codex 配置写入；命令行等价：
+菜单 `5` → `1`（重新生成并应用）会一并完成模型目录生成与 Codex 配置写入；命令行等价：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action setup-codex
@@ -153,7 +153,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action 
 
 ### 5. 迁移历史会话（必做）
 
-续聊列表按会话的 `model_provider` 分抽屉，不迁移则旧会话（`openai` 标签）不可见。先完全退出 Codex，然后（菜单 `7` 带详细说明，或命令行）：
+续聊列表按会话的 `model_provider` 分抽屉，不迁移则旧会话（`openai` 标签）不可见。先完全退出 Codex，然后（菜单 `6` → `1` 带详细说明，或命令行）：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action migrate-sessions
@@ -198,7 +198,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action 
 
 ## 恢复官方配置
 
-不再走本地路由时，先完全退出 Codex 桌面端与 CLI，然后（菜单 `10`，完成后可选择立即重启 Codex/ChatGPT 桌面端；或命令行）：
+不再走本地路由时，先完全退出 Codex 桌面端与 CLI，然后（菜单 `5` → `4`，完成后可选择立即重启 Codex/ChatGPT 桌面端；或命令行）：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\manage-router.ps1 -Action restore-official

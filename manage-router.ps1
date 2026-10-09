@@ -534,16 +534,12 @@ function Show-Menu {
     Write-Host ' Codex 模型路由器 - 管理菜单'
     Write-Host " 项目目录: $ProjectDirectory"
     Write-Host '=============================================='
-    Write-Host ' 1) 重启路由器（停止旧实例 + 后台启动）'
-    Write-Host ' 2) 后台启动路由器'
-    Write-Host ' 3) 停止路由器'
-    Write-Host ' 4) 健康检查'
-    Write-Host ' 5) 设置 API Key（供应商密钥）'
-    Write-Host ' 6) 重新生成配置（模型目录 + 写入 Codex 配置）'
-    Write-Host ' 7) 迁移历史会话标签'
-    Write-Host ' 8) 开启登录自启动'
-    Write-Host ' 9) 关闭登录自启动'
-    Write-Host '10) 恢复 Codex 官方配置'
+    Write-Host ' 1) 启动/重启路由器（先停止旧实例）'
+    Write-Host ' 2) 停止路由器'
+    Write-Host ' 3) 健康检查'
+    Write-Host ' 4) 设置 API Key'
+    Write-Host ' 5) 配置管理（模型目录 / Codex 配置）'
+    Write-Host ' 6) 高级（会话标签 / 登录自启动）'
     Write-Host ' 0) 退出'
     Write-Host ''
 }
@@ -590,49 +586,134 @@ function Invoke-ApplyRouterConfig {
     }
 }
 
+function Get-RouterAutostartEnabled {
+    return $null -ne (Get-ItemProperty -Path $RunKey -Name $AutostartEntry -ErrorAction SilentlyContinue)
+}
+
+# 迁移历史会话标签：先说明用途，再询问源/目标标签。
+function Invoke-MigrateSessionsFlow {
+    Write-Host ''
+    Write-Host '【功能说明】Codex 的续聊列表按会话记录的 model_provider 标签分抽屉显示，'
+    Write-Host '只显示与当前激活供应商同标签的会话。本功能把历史会话的标签批量改写：'
+    Write-Host '  源标签 -> 目标标签（默认 openai -> local_router），'
+    Write-Host '让旧会话在当前路由配置下重新出现在续聊列表。'
+    Write-Host '修改范围：'
+    Write-Host '  - sessions\ 与 archived_sessions\ 下 JSONL 第一行的 session_meta.model_provider'
+    Write-Host '  - state_5.sqlite 的 threads.model_provider'
+    Write-Host '安全措施：只改标签、不动对话内容；修改前自动备份到'
+    Write-Host 'backups\session-provider-migration-<时间戳>\；可重复执行（幂等）。'
+    Write-Host '注意：需要先完全退出 Codex 桌面端/CLI，正在运行时脚本会拒绝执行。'
+    Write-Host ''
+    $from = Read-Host '源 provider 标签 [openai]'
+    if (-not $from) { $from = 'openai' }
+    $to = Read-Host '目标 provider 标签 [local_router]'
+    if (-not $to) { $to = 'local_router' }
+    Invoke-MigrateSessions $from $to
+}
+
+# 恢复官方配置：执行后询问是否立即重启 Codex/ChatGPT 桌面端。
+function Invoke-RestoreOfficialFlow {
+    Invoke-RestoreOfficial
+    Write-Host ''
+    $answer = Read-Host '是否立即重启 Codex/ChatGPT 桌面端？(y/N)'
+    if ($answer -match '^[yY]') {
+        Restart-CodexApps
+    } else {
+        Write-Host '已跳过，请稍后手动完全退出并重新打开 Codex/ChatGPT 桌面端。'
+    }
+}
+
+# 登录自启动开关：按当前状态切换，避免菜单里放“开启/关闭”两个重复项。
+function Switch-RouterAutostart {
+    if (Get-RouterAutostartEnabled) {
+        Write-Host '登录自启动当前为：已开启，正在关闭...'
+        Disable-RouterAutostart
+    } else {
+        Write-Host '登录自启动当前为：未开启，正在开启...'
+        Enable-RouterAutostart
+    }
+}
+
+# 配置管理子菜单：模型目录、Codex 配置、恢复官方配置。
+function Invoke-ConfigMenu {
+    while ($true) {
+        Clear-Host
+        Write-Host '================ 配置管理 ================'
+        Write-Host ' 1) 重新生成并应用（模型目录 + Codex 配置，可选重启）'
+        Write-Host ' 2) 仅重建模型目录'
+        Write-Host ' 3) 仅应用 Codex 配置'
+        Write-Host ' 4) 恢复 Codex 官方配置（可选重启 Codex）'
+        Write-Host ' 0) 返回主菜单'
+        Write-Host ''
+        $choice = Read-Host '请输入选项'
+        if ([string]::IsNullOrEmpty($choice) -or $choice -eq '0') { return }
+        switch ($choice) {
+            '1' { Invoke-ApplyRouterConfig }
+            '2' { Build-ModelCatalog $MultiAgent }
+            '3' { Invoke-SetupCodex }
+            '4' { Invoke-RestoreOfficialFlow }
+            default { Write-Host '无效选项。' }
+        }
+        Write-Host ''
+        Read-Host '按回车返回' | Out-Null
+    }
+}
+
+# 高级子菜单：会话标签迁移与登录自启动开关。
+function Invoke-AdvancedMenu {
+    while ($true) {
+        Clear-Host
+        Write-Host '================== 高级 =================='
+        Write-Host " 登录自启动：$(if (Get-RouterAutostartEnabled) { '已开启' } else { '未开启' })"
+        Write-Host ' 1) 迁移历史会话标签'
+        Write-Host ' 2) 切换登录自启动'
+        Write-Host ' 0) 返回主菜单'
+        Write-Host ''
+        $choice = Read-Host '请输入选项'
+        if ([string]::IsNullOrEmpty($choice) -or $choice -eq '0') { return }
+        switch ($choice) {
+            '1' { Invoke-MigrateSessionsFlow }
+            '2' { Switch-RouterAutostart }
+            default { Write-Host '无效选项。' }
+        }
+        Write-Host ''
+        Read-Host '按回车返回' | Out-Null
+    }
+}
+
+# 返回值：exit=退出菜单，none=子菜单已处理暂停，pause=由主循环等待回车。
 function Invoke-MenuAction([string]$Choice) {
     switch ($Choice) {
-        '1' { Invoke-RouterRestart }
-        '2' { Invoke-RouterStartBackground }
-        '3' { Invoke-RouterStop }
-        '4' { Invoke-RouterHealth }
-        '5' { Invoke-SetApiKeyFlow }
-        '6' { Invoke-ApplyRouterConfig }
-        '7' {
-            Write-Host ''
-            Write-Host '【功能说明】Codex 的续聊列表按会话记录的 model_provider 标签分抽屉显示，'
-            Write-Host '只显示与当前激活供应商同标签的会话。本功能把历史会话的标签批量改写：'
-            Write-Host '  源标签 -> 目标标签（默认 openai -> local_router），'
-            Write-Host '让旧会话在当前路由配置下重新出现在续聊列表。'
-            Write-Host '修改范围：'
-            Write-Host '  - sessions\ 与 archived_sessions\ 下 JSONL 第一行的 session_meta.model_provider'
-            Write-Host '  - state_5.sqlite 的 threads.model_provider'
-            Write-Host '安全措施：只改标签、不动对话内容；修改前自动备份到'
-            Write-Host 'backups\session-provider-migration-<时间戳>\；可重复执行（幂等）。'
-            Write-Host '注意：需要先完全退出 Codex 桌面端/CLI，正在运行时脚本会拒绝执行。'
-            Write-Host ''
-            $from = Read-Host '源 provider 标签 [openai]'
-            if (-not $from) { $from = 'openai' }
-            $to = Read-Host '目标 provider 标签 [local_router]'
-            if (-not $to) { $to = 'local_router' }
-            Invoke-MigrateSessions $from $to
+        '1' {
+            Invoke-RouterRestart
+            return 'pause'
         }
-        '8' { Enable-RouterAutostart }
-        '9' { Disable-RouterAutostart }
-        '10' {
-            Invoke-RestoreOfficial
-            Write-Host ''
-            $answer = Read-Host '是否立即重启 Codex/ChatGPT 桌面端？(y/N)'
-            if ($answer -match '^[yY]') {
-                Restart-CodexApps
-            } else {
-                Write-Host '已跳过，请稍后手动完全退出并重新打开 Codex/ChatGPT 桌面端。'
-            }
+        '2' {
+            Invoke-RouterStop
+            return 'pause'
         }
-        '0' { return $false }
-        default { Write-Host '无效选项。' }
+        '3' {
+            Invoke-RouterHealth
+            return 'pause'
+        }
+        '4' {
+            Invoke-SetApiKeyFlow
+            return 'pause'
+        }
+        '5' {
+            Invoke-ConfigMenu
+            return 'none'
+        }
+        '6' {
+            Invoke-AdvancedMenu
+            return 'none'
+        }
+        '0' { return 'exit' }
+        default {
+            Write-Host '无效选项。'
+            return 'pause'
+        }
     }
-    return $true
 }
 
 function Invoke-Action([string]$Name) {
@@ -665,15 +746,17 @@ if ($result -eq 'menu') {
         # EOF on redirected stdin must leave the menu instead of spinning forever.
         if ([string]::IsNullOrEmpty($choice)) { break }
         try {
-            $continue = Invoke-MenuAction $choice
+            $next = Invoke-MenuAction $choice
         } catch {
             # One failing action must not kill the menu session.
             Write-Host ''
             Write-Host "错误：$($_.Exception.Message)" -ForegroundColor Red
-            $continue = $true
+            $next = 'pause'
         }
-        if ($continue -eq $false) { break }
-        Write-Host ''
-        Read-Host '按回车返回菜单' | Out-Null
+        if ($next -eq 'exit') { break }
+        if ($next -ne 'none') {
+            Write-Host ''
+            Read-Host '按回车返回菜单' | Out-Null
+        }
     }
 }
