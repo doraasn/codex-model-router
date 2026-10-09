@@ -96,6 +96,15 @@ const deepSeekModels = officialDeepSeekModels.map((officialModel) => {
 // 仅复用现有 Codex 目录条目的代理能力，实际型号由路由别名映射。
 // 图像能力按 AstraHub /v1/responses 实测填写：kimi-k3、deepseek-v4.1-flash
 // 能正确识别图片内容；GLM-5.2 对图片返回错误答案，按纯文本模型处理。
+// 档位按实测填写：none/minimal/low/medium/high/xhigh/max 均被接受，ultra 会被
+// 网关拒绝（unknown type: ultra），因此只暴露 Codex 常用的 low→max 五档。
+const astraHubReasoningLevels = [
+  { effort: "low", description: "Fast responses with lighter reasoning" },
+  { effort: "medium", description: "Balances speed and reasoning depth for everyday tasks" },
+  { effort: "high", description: "Greater reasoning depth for complex problems" },
+  { effort: "xhigh", description: "Extra high reasoning depth for complex problems" },
+  { effort: "max", description: "Maximum reasoning depth for the hardest problems" },
+];
 const astraHubModels = [
   ["as-kimi-k3", "AS-kimi-k3", "kimi-k3", true],
   ["as-deepseek-v4.1-flash", "AS-deepseek-v4.1-flash", "deepseek-v4.1-flash", true],
@@ -111,7 +120,7 @@ const astraHubModels = [
   input_modalities: supportsImage ? ["text", "image"] : ["text"],
   supports_image_detail_original: supportsImage,
   default_reasoning_level: "medium",
-  supported_reasoning_levels: [{ effort: "medium", description: "Standard reasoning" }],
+  supported_reasoning_levels: astraHubReasoningLevels.map((level) => ({ ...level })),
   visibility: "list",
 }));
 

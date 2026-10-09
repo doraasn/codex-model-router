@@ -148,6 +148,11 @@ test("generates the catalog from the official DeepSeek baseline and passes the r
     assert.equal(model.max_context_window, 1000000);
     assert.deepEqual(model.input_modalities, expectsImage ? ["text", "image"] : ["text"]);
     assert.equal(model.supports_image_detail_original, expectsImage);
+    assert.equal(model.default_reasoning_level, "medium");
+    assert.deepEqual(
+      model.supported_reasoning_levels.map((level) => level.effort),
+      ["low", "medium", "high", "xhigh", "max"],
+    );
   }
 });
 
