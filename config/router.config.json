@@ -25,13 +25,14 @@
       "modelAliases": {
         "deepseek-pro": "deepseek-v4-pro"
       },
-      "transforms": ["deepseek-effort", "deepseek-call-ids"]
+      "transforms": ["deepseek-effort", "deepseek-call-ids", "tool-adjacency"]
     },
     {
       "id": "astrahub",
       "baseUrl": "https://www.astrahub-ai.com/v1/",
       "auth": { "type": "env", "envVar": "ASTRAHUB_API_KEY" },
       "match": { "models": ["as-kimi-k3", "as-deepseek-v4.1-flash", "as-glm-5.2"] },
+      "transforms": ["tool-adjacency"],
       "modelAliases": {
         "as-kimi-k3": "kimi-k3",
         "as-deepseek-v4.1-flash": "deepseek-v4.1-flash",

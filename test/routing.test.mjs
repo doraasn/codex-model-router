@@ -31,7 +31,7 @@ function routerConfig({ chatgptPort, deepseekPort, maxBodyBytes = 1024 * 1024, r
         baseUrl: `http://127.0.0.1:${deepseekPort}/`,
         auth: { type: "env", envVar: "DEEPSEEK_API_KEY" },
         match: { models: new Set([...DEEPSEEK_MODELS]), prefixes: [] },
-        transforms: ["deepseek-effort", "deepseek-call-ids"],
+        transforms: ["deepseek-effort", "deepseek-call-ids", "tool-adjacency"],
       },
     ],
   };
@@ -682,6 +682,116 @@ test("deduplicates DeepSeek tool declarations across top-level tools and input i
   assert.equal(gptBody.tools[2].type, "namespace");
   assert.equal(gptBody.input[2].tools[0].name, "mcp__idea");
   assert.equal(gptBody.input[5].tools, undefined);
+});
+
+test("moves developer notices that split a tool batch behind all tool outputs", async (t) => {
+  const chatGptReceived = [];
+  const deepSeekReceived = [];
+  const chatGptServer = mockUpstream(chatGptReceived);
+  const deepSeekServer = mockUpstream(deepSeekReceived);
+  const chatGptPort = await listen(chatGptServer);
+  const deepSeekPort = await listen(deepSeekServer);
+  t.after(() => chatGptServer.close());
+  t.after(() => deepSeekServer.close());
+
+  process.env.DEEPSEEK_API_KEY = "deepseek-test-key";
+  t.after(() => delete process.env.DEEPSEEK_API_KEY);
+
+  const router = await createRouterServer({
+    config: routerConfig({ chatgptPort: chatGptPort, deepseekPort: deepSeekPort }),
+  });
+  const routerPort = await listen(router);
+  t.after(() => router.close());
+
+  const headers = {
+    authorization: "Bearer chatgpt-test-token",
+    "content-type": "application/json",
+  };
+  const kind = (item) => item.role || item.type;
+  const call = (callId, name) => ({
+    type: "function_call",
+    id: `fc_${callId}`,
+    call_id: callId,
+    name,
+    arguments: "{}",
+  });
+  const output = (callId, value) => ({
+    type: "function_call_output",
+    id: `fco_${callId}`,
+    call_id: callId,
+    output: value,
+  });
+  // 复刻 01a13330 会话卡死时的顺序：view_image 与 exec_command 同批，
+  // 截图缩放通知（developer）插在两条工具结果之间。
+  const interleavedInput = [
+    { type: "message", role: "user", content: [{ type: "input_text", text: "看下手机屏幕" }] },
+    call("call_img", "view_image"),
+    call("call_exec", "exec_command"),
+    output("call_img", [{ type: "input_image", image_url: "data:image/png;base64,AAAA" }]),
+    {
+      type: "message",
+      role: "developer",
+      content: [{ type: "input_text", text: "<image_resize_notice>resized 1440x3200 -> 922x2048</image_resize_notice>" }],
+    },
+    output("call_exec", "ok"),
+  ];
+
+  const deepSeekResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "deepseek-v4-flash", input: interleavedInput }),
+  });
+  assert.equal(deepSeekResponse.status, 200);
+  await deepSeekResponse.text();
+
+  // 同一批的两条工具结果恢复连续，developer 通知移到结果之后
+  const dsInput = deepSeekReceived[0].body.input;
+  assert.deepEqual(dsInput.map(kind), [
+    "user",
+    "function_call",
+    "function_call",
+    "function_call_output",
+    "function_call_output",
+    "developer",
+  ]);
+  assert.deepEqual(
+    dsInput.slice(3, 5).map((item) => item.call_id),
+    ["call_img", "call_exec"],
+  );
+
+  // 工具结果本来连续时不改动任何顺序
+  const cleanInput = [
+    interleavedInput[0],
+    interleavedInput[1],
+    interleavedInput[2],
+    interleavedInput[3],
+    interleavedInput[5],
+  ];
+  const cleanResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "deepseek-v4-flash", input: cleanInput }),
+  });
+  assert.equal(cleanResponse.status, 200);
+  await cleanResponse.text();
+  assert.deepEqual(deepSeekReceived[1].body.input, cleanInput);
+
+  // GPT 路由不做此重排，原始顺序原样透传
+  const gptResponse = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: "gpt-5.6-sol", input: interleavedInput }),
+  });
+  assert.equal(gptResponse.status, 200);
+  await gptResponse.text();
+  assert.deepEqual(chatGptReceived[0].body.input.map(kind), [
+    "user",
+    "function_call",
+    "function_call",
+    "function_call_output",
+    "developer",
+    "function_call_output",
+  ]);
 });
 
 test("supports additional providers declared in config without code changes", async (t) => {

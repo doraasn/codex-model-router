@@ -341,12 +341,81 @@ function sanitizeDeepSeekCallIds(payload) {
   return changed;
 }
 
+// DeepSeek/AstraHub 把 Responses 条目转成 chat-completions 后，会强校验
+// 「assistant 的 tool_calls 后面必须紧跟每个 tool_call_id 对应的 tool 消息」。
+// Codex 客户端在工具返回大图被缩放时，会把 <image_resize_notice> 这条 developer
+// 消息插在同一批的两条工具结果之间（view_image 与其它工具并行调用时），顺序变成
+// tool -> developer -> tool，上游直接 400：
+// "An assistant message with 'tool_calls' must be followed by tool messages
+//  responding to each 'tool_call_id'. (insufficient tool messages following
+//  tool_calls message)"。该顺序会写进会话历史，之后每次回放都失败，整个会话卡死。
+// 处理规则：只把夹在同一批工具结果之间的 developer 消息移到该批最后一条结果之后，
+// 工具调用与结果本来连续时不改动任何顺序，也不改内容。
+function sanitizeToolCallAdjacency(payload) {
+  if (!payload || !Array.isArray(payload.input)) return false;
+  const callTypes = new Set(["function_call", "custom_tool_call"]);
+  const outputTypes = new Set(["function_call_output", "custom_tool_call_output"]);
+  const input = payload.input;
+  const reordered = [];
+  let changed = false;
+  let index = 0;
+  while (index < input.length) {
+    const item = input[index];
+    if (!item || typeof item !== "object" || !callTypes.has(item.type)) {
+      reordered.push(item);
+      index += 1;
+      continue;
+    }
+    // 收集这批连续的工具调用，按 call_id 等它们各自的工具结果
+    const calls = [];
+    while (index < input.length && input[index] && callTypes.has(input[index].type)) {
+      calls.push(input[index]);
+      index += 1;
+    }
+    const pending = new Set();
+    for (const call of calls) {
+      if (typeof call.call_id === "string" && call.call_id) pending.add(call.call_id);
+    }
+    const outputs = [];
+    const interleaved = [];
+    while (index < input.length && pending.size > 0) {
+      const current = input[index];
+      if (!current || typeof current !== "object" || callTypes.has(current.type)) break;
+      if (outputTypes.has(current.type)) {
+        if (!pending.has(current.call_id)) break;
+        pending.delete(current.call_id);
+        outputs.push(current);
+        index += 1;
+        continue;
+      }
+      // 只搬运实测会插进工具批次的 developer 通知，其它类型一律停手，避免挪动无关条目
+      if (current.type === "message" && current.role === "developer") {
+        interleaved.push(current);
+        index += 1;
+        continue;
+      }
+      break;
+    }
+    reordered.push(...calls, ...outputs);
+    if (interleaved.length > 0) {
+      reordered.push(...interleaved);
+      changed = true;
+      process.stderr.write(
+        `${new Date().toISOString()} tool-adjacency: moved ${interleaved.length} developer message(s) behind tool outputs\n`,
+      );
+    }
+  }
+  if (changed) payload.input = reordered;
+  return changed;
+}
+
 // 请求体变换注册表：provider 通过 transforms 数组按序引用。
 // 新供应商的兼容逻辑以新函数加入此处，再在配置里按名挂载。
 const PAYLOAD_TRANSFORMS = new Map([
   ["chatgpt-history", sanitizeChatGptPayload],
   ["deepseek-effort", normalizeDeepSeekPayload],
   ["deepseek-call-ids", sanitizeDeepSeekCallIds],
+  ["tool-adjacency", sanitizeToolCallAdjacency],
 ]);
 
 function buildChatGptHeaders(incomingHeaders) {
